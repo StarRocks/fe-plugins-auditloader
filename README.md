@@ -226,4 +226,4 @@ Wait for about 1 minute and check the audit table data:
 mysql> select * from starrocks_audit_db__.starrocks_audit_tbl__;
 ```
 
-**Note: The data is usually stored correctly, if there is no data in the table, you can check if the IP, port, user privileges, and user password information in the configuration file plugin.conf are correct. The audit plugin's logs are printed in the fe.log of each FE, so you can also search for the keyword "audit" in fe.log and use the approach of investigating Stream Load tasks to locate the problem.
+**Note: The data is usually stored correctly, if there is no data in the table, you can check if the IP, port, user privileges, and user password information in the configuration file plugin.conf are correct. The audit plugin's logs are printed in the fe.log of each FE, so you can also search for the keyword "audit" in fe.log and use the approach of investigating Stream Load tasks to locate the problem.**
