@@ -1,73 +1,72 @@
 # fe-plugins-auditloader
-### 插件说明：
+### Description：
 
-StarRocks 中所有 SQL 的审计日志保存在本地 fe/log/fe.audit.log 中，没有入库保存。为方便对业务 SQL 进行分析，社区开发出将审计信息入库 StarRocks 的审计日志插件。在实现上，StarRocks 会在执行 SQL 后调用该插件收集 SQL 的审计信息，审计信息的内容会在内存中攒批后基于 Stream Load 的方式导入至 StarRocks 表中。
+In StarRocks, all SQL audit logs are saved in a local file named fe/log/fe.audit.log, and are not stored in the database. To facilitate the analysis of business SQL, a plugin has been developed to load audit information into StarRocks and allow users to view query statistics. The plugin is implemented such that StarRocks calls the plugin to collect audit information after executing an SQL statement. The audit information is collected in memory and then imported into StarRocks tables based on the Stream Load method.
 
-**注意事项：**
+**Important Notes:**
 
-1、使用插件：随着 StarRocks 的迭代升级，审计日志 fe.audit.log 中的字段个数可能会逐渐增多，因此不同的 StarRocks 版本需要使用对应版本的插件，同时在 StarRocks 中存放审计日志的表的创建语句也要随之调整。当前代码及下文演示所用的建表语句适用于 **StarRocks 2.4 及后续**版本。
+1、Using the plugin: As StarRocks iterates and upgrades, the number of fields in the audit log file fe.audit.log may gradually increase. Therefore, different StarRocks versions require corresponding versions of the plugin, and the creation statement of the audit log table in StarRocks must also be adjusted. The current code and the following demonstration use the creation statement of the audit log table suitable for StarRocks 2.4 and later versions.
 
-2、开发插件：若发现 StarRocks 新版本中的审计日志字段或格式出现了变化，则需要替换 Java 工程中的 `fe-plugins-auditloader\lib\starrocks-fe.jar` 为新版本 StarRocks 包中 `fe/lib/starrocks-fe.jar`，同时修改代码中和字段相关的内容。
+2、Developing the plugin: If you find that the audit log fields or format in the new version of StarRocks have changed, you need to replace the fe-plugins-auditloader\lib\starrocks-fe.jar with the new version of StarRocks package's fe/lib/starrocks-fe.jar and modify the code related to fields.
 
 
+### Usage Instructions:
 
-### 使用说明：
+##### 1、Create an internal table
 
-##### 1、创建内部表
+First, create a dynamic partition table in StarRocks to save the audit log data. To standardize usage, it is recommended to create a separate database for it.
 
-首先需要在 StarRocks 中创建一个动态分区表，来保存审计日志中的数据。为了规范使用，建议为其单独创建一个数据库。
-
-例如，创建存放审计日志的数据库 `starrocks_audit_db__`：
+For example, create a database named starrocks_audit_db__:
 
 ```SQL
 create database starrocks_audit_db__;
 ```
 
-在 `starrocks_audit_db__` 库创建 `starrocks_audit_tbl__` 表：
+Create the starrocks_audit_tbl__ table in the starrocks_audit_db__ database:
 
 ```SQL
 CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
-  `queryId` VARCHAR(48) COMMENT "查询的唯一ID",
-  `timestamp` DATETIME NOT NULL COMMENT "查询开始时间",
-  `queryType` VARCHAR(12) COMMENT "查询类型（query, slow_query）",
-  `clientIp` VARCHAR(32) COMMENT "客户端IP",
-  `user` VARCHAR(64) COMMENT "查询用户名",
-  `authorizedUser` VARCHAR(64) COMMENT "用户唯一标识，既user_identity",
-  `resourceGroup` VARCHAR(64) COMMENT "资源组名",
-  `catalog` VARCHAR(32) COMMENT "数据目录名",
-  `db` VARCHAR(96) COMMENT "查询所在数据库",
-  `state` VARCHAR(8) COMMENT "查询状态（EOF，ERR，OK）",
-  `errorCode` VARCHAR(96) COMMENT "错误码",
-  `queryTime` BIGINT COMMENT "查询执行时间（毫秒）",
-  `scanBytes` BIGINT COMMENT "查询扫描的字节数",
-  `scanRows` BIGINT COMMENT "查询扫描的记录行数",
-  `returnRows` BIGINT COMMENT "查询返回的结果行数",
-  `cpuCostNs` BIGINT COMMENT "查询CPU耗时（纳秒）",
-  `memCostBytes` BIGINT COMMENT "查询消耗内存（字节）",
-  `stmtId` INT COMMENT "SQL语句增量ID",
-  `isQuery` TINYINT COMMENT "SQL是否为查询（1或0）",
-  `feIp` VARCHAR(32) COMMENT "执行该语句的FE IP",
-  `stmt` STRING COMMENT "SQL原始语句",
-  `digest` VARCHAR(32) COMMENT "慢SQL指纹",
-  `planCpuCosts` DOUBLE COMMENT "查询规划阶段CPU占用（纳秒）",
-  `planMemCosts` DOUBLE COMMENT "查询规划阶段内存占用（字节）"
+  `queryId` VARCHAR(48) COMMENT "Unique ID of the query",
+  `timestamp` DATETIME NOT NULL COMMENT "Start time of the query",
+  `queryType` VARCHAR(12) COMMENT "Query type (query, slow_query)",
+  `clientIp` VARCHAR(32) COMMENT "Client IP",
+  `user` VARCHAR(64) COMMENT "Query username",
+  `authorizedUser` VARCHAR(64) COMMENT "Unique identifier for the user",
+  `resourceGroup` VARCHAR(64) COMMENT "Resource group name",
+  `catalog` VARCHAR(32) COMMENT "Data directory name",
+  `db` VARCHAR(96) COMMENT "Query 所在的数据库",
+  `state` VARCHAR(8) COMMENT "Query state (EOF, ERR, OK)",
+  `errorCode` VARCHAR(96) COMMENT "Error code",
+  `queryTime` BIGINT COMMENT "Query execution time (milliseconds)",
+  `scanBytes` BIGINT COMMENT "Query scan bytes",
+  `scanRows` BIGINT COMMENT "Query scan row count",
+  `returnRows` BIGINT COMMENT "Query return row count",
+  `cpuCostNs` BIGINT COMMENT "Query CPU cost (nanoseconds)",
+  `memCostBytes` BIGINT COMMENT "Query memory cost (bytes)",
+  `stmtId` INT COMMENT "SQL statement increment ID",
+  `isQuery` TINYINT COMMENT "Is the SQL a query (1 or 0)",
+  `feIp` VARCHAR(32) COMMENT "IP of the FE that executed the query",
+  `stmt` STRING COMMENT "Original SQL statement",
+  `digest` VARCHAR(32) COMMENT "Slow SQL fingerprint",
+  `planCpuCosts` DOUBLE COMMENT "Query planning phase CPU cost (nanoseconds)",
+  `planMemCosts` DOUBLE COMMENT "Query planning phase memory cost (bytes)"
 ) ENGINE = OLAP
 DUPLICATE KEY (`queryId`, `timestamp`, `queryType`)
-COMMENT "审计日志表"
+COMMENT "Audit log table"
 PARTITION BY RANGE (`timestamp`) ()
 DISTRIBUTED BY HASH (`queryId`) BUCKETS 3 
 PROPERTIES (
   "dynamic_partition.time_unit" = "DAY",
-  "dynamic_partition.start" = "-30",  --表示只保留最近30天的审计信息，可视需求调整
+  "dynamic_partition.start" = "-30",  --This indicates that only the audit information within the last 30 days will be retained, and the requirement can be adjusted as needed.
   "dynamic_partition.end" = "3",
   "dynamic_partition.prefix" = "p",
   "dynamic_partition.buckets" = "3",
   "dynamic_partition.enable" = "true",
-  "replication_num" = "3"  --若集群中BE个数不大于3，可调整副本数为1，生产集群不推荐调整
+  "replication_num" = "3"  --If the number of BEs in the cluster is no more than 3, you can adjust the number of replicas to 1. It is not recommended to adjust the production cluster.
 );
 ```
 
-`starrocks_audit_tbl__` 是动态分区表，我们在建表时没有直接创建分区，所以建表后需要等待后台动态分区调度线程调度后才会生成当天及后三天的分区。动态分区线程默认每10分钟被调度一次，我们可以先观察该表的分区是否已经被创建，再进行后续操作。分区查看语句为：
+`starrocks_audit_tbl__` is a dynamically partitioned table. Since we did not directly create partitions when building the table, we need to wait for the background dynamic partition scheduling thread to schedule before the partitions for the current day and the next three days will be generated. By default, the dynamic partition thread is scheduled every 10 minutes. We can first check if the partitions for the table have been created and then proceed with the subsequent operations. The partition inspection statement is:
 
 ```SQL
 show partitions from starrocks_audit_db__.starrocks_audit_tbl__;
@@ -75,9 +74,9 @@ show partitions from starrocks_audit_db__.starrocks_audit_tbl__;
 
 
 
-##### 2、修改配置文件
+##### 2、Modify the configuration file
 
-执行安装时，所需的审计插件完整包为 auditloader.zip，使用 unzip 命令解压插件：
+During the installation, the required audit plugin package is auditloader.zip. Use the unzip command to extract the plugin:
 
 ```SHELL
 [root@node01 ~]# unzip auditloader.zip
@@ -87,15 +86,15 @@ Archive:  auditloader.zip
   inflating: plugin.properties
 ```
 
-说明：该命令会将 zip 内的文件直接解压到当前目录，解压后可以得到插件中的三个文件：
+Description: This command will extract the files inside the zip directly to the current directory. After extraction, you can get three files in the plugin:
 
-`auditloader.jar`：插件代码打包的核心 jar 包
+`auditloader.jar`：The core jar package for packaging plugin code.
 
-`plugin.conf`：插件配置文件，需根据集群信息修改
+`plugin.conf`：The plugin configuration file, which needs to be modified according to the cluster information.
 
-`plugin.properties`：插件属性文件，通常无需修改
+`plugin.properties`：The plugin property file, usually without modification.
 
-根据我们实际的集群信息，修改配置文件 `plugin.conf`：
+According to our actual cluster information, modify the configuration file `plugin.conf`：
 
 ```XML
 ### plugin configuration
@@ -132,19 +131,19 @@ user=root
 password=
 ```
 
-修改完成后，可使用 zip 命令将上面的三个文件重新打包为 zip 包：
+After modification, you can use the zip command to repackage the three files into a zip package：
 
 ```SHELL
 [root@node01 ~]# zip -q -m -r auditloader.zip auditloader.jar plugin.conf plugin.properties
 ```
 
-**注意：该命令会将需要打包的文件移动到 auditloader.zip 中，并覆盖该目录下原有的 auditloader.zip 文件。也即执行完打包命令后，该目录下只会保留一个最新的 auditloader.zip 插件包。**
+**Note: This command will move the files to be packed into auditloader.zip, and overwrite the existing auditloader.zip file in the directory.**
 
 
 
-##### 3、分发插件
+##### 3、Distribute the plugin
 
-当使用本地包方式安装时，需将 auditloader.zip 分发至集群所有 FE 节点，且各节点分发路径需要一致。例如我们都分发至 StarRocks 部署目录 `/opt/module/starrocks/` 下，也即 auditloader.zip 文件在集群所有 FE 节点的路径都为：
+When using the local package installation method, you need to distribute auditloader.zip to all FE nodes in the cluster, and the distribution path of each node needs to be consistent. For example, we all distribute it to the StarRocks deployment directory /opt/module/starrocks/ , so the path of auditloader.zip on all FE nodes in the cluster is:
 
 ```
 /opt/module/starrocks/auditloader.zip
@@ -152,21 +151,21 @@ password=
 
 
 
-##### 4、安装插件
+##### 4、Install the plugin
 
-StarRocks 安装本地插件的语法为：
+The syntax for StarRocks to install a local plugin is:
 
 ```sql
 INSTALL PLUGIN FROM "/location/plugin_package_name.zip";
 ```
 
-例如根据上文分发文件的路径修改命令后执行：
+For example, modify the command based on the distribution file path mentioned above and execute:
 
 ```SQL
 mysql> INSTALL PLUGIN FROM "/opt/module/starrocks/auditloader.zip";
 ```
 
-安装完成后，查看当前已安装插件信息：
+After installation, view the currently installed plugin information:
 
 ```SQL
 mysql> SHOW PLUGINS\G
@@ -194,26 +193,26 @@ JavaVersion: 1.8.0
  Properties: {}
 ```
 
-可看到当前有两个插件，其中 Name 为 `AuditLoader` 的插件即为上文安装的审计日志插件，其状态为 INSTALLED 表示已安装成功。Name 为 `__builtin_AuditLogBuilder` 的插件为 StarRocks 内置的审计插件，用来打印审计信息到本地日志目录生成  fe.audit.log，当前不需要关注。需要说明的是，这两个插件的数据来源于同一个方法，若感觉新安装的审计插件入库后的数据不正确，可对比 fe.audit.log 来进行验证。
+Currently, there are two plugins, one of which is the audit log plugin installed in the previous article, with the name AuditLoader, and its status is INSTALLED, indicating that it has been successfully installed. The plugin named __builtin_AuditLogBuilder is the built-in audit plugin of StarRocks, used to print audit information to the local log directory to generate fe.audit.log. There is no need to pay attention to it for now. It should be noted that these two plugins share the same data source. If you feel that the data in the newly installed audit plugin is not correct after being added to the database, you can compare it with fe.audit.log for verification.
 
-**说明：fe/plugins 是 StarRocks 外部插件的安装目录，在审计插件安装完成后，会在各个 FE 的 fe/plugins 中生成一个 AuditLoader 文件夹（插件卸载后该目录自动删除）。若我们后续需要修改插件的配置，除卸载重装插件（推荐），也可替换该目录中的 auditloader.jar 或修改 plugin.conf，然后重启 FE 使修改生效。**
+**Note: fe/plugins is the installation directory of StarRocks external plugins. After the audit plugin is installed, a AuditLoader folder will be generated in the fe/plugins directory of each FE (the directory will be automatically deleted after the plugin is uninstalled). If we need to modify the plugin configuration later, in addition to uninstalling and reinstalling the plugin (recommended), we can also replace the auditloader.jar in the directory or modify the plugin.conf, and then restart the FE to make the modifications effective.**
 
 
 
-##### 5、卸载插件
+##### 5、Uninstalling Plugins
 
-在需要升级插件或者调整插件配置时，AuditLoader 插件也可视需求进行卸载，卸载命令的语法为：
+When needed to upgrade a plugin or adjust its configuration, the AuditLoader plugin can also be uninstalled as needed. The uninstall command syntax is:
 
 ```SQL
 UNINSTALL PLUGIN plugin_name;
---plugin_name 即 SHOW PLUGINS 命令查到的插件 Name 信息，通常应为 AuditLoader。
+--plugin_name refers to the Name information of the plugin found in the SHOW PLUGINS command, which should usually be AuditLoader.  
 ```
 
 
 
-##### 6、查看数据
+##### 6、Viewing Data
 
-在 AuditLoader 插件安装完成后，SQL 执行后的审计信息并不是实时入库。StarRocks 后台会按照配置文件 plugin.conf 中配置的参数，攒批 60 秒或 50M 执行一次 Stream Load 导入。测试等待期间，可简单执行几条 SQL 语句，看对应的审计数据是否能够正常入库，例如执行：
+After the AuditLoader plugin is installed, the audit information after SQL execution is not immediately stored in the database. StarRocks will perform a Stream Load import every 60 seconds or 50M based on the configuration parameters in the plugin.conf file. During the test waiting period, you can simply execute a few SQL statements to see if the corresponding audit data can be stored normally, such as:
 
 ```sql
 mysql> CREATE DATABASE test;
@@ -221,10 +220,10 @@ mysql> CREATE TABLE test.audit_test(c1 int,c2 int,c3 int,c4 date,c5 bigint) Dist
 mysql> insert into test.audit_test values(211014001,10001,13,'2021-10-14',1999),(211014002,10002,13,'2021-10-14',6999),(211015098,16573,19,'2021-10-15',3999);
 ```
 
-等待 1 分钟左右，查看审计表数据：
+Wait for about 1 minute and check the audit table data:
 
 ```sql
 mysql> select * from starrocks_audit_db__.starrocks_audit_tbl__;
 ```
 
-**说明：通常数据都可以正确入库，若表内始终没有数据，可以检查配置文件 plugin.conf 中 IP、端口、用户权限、用户密码等信息是否正确。审计插件的日志会打印在各个 FE 的 fe.log 中，因此也可以在 fe.log 中检索关键字 `audit`，用排查 Stream Load 任务的思路来定位问题。**
+**Note: The data is usually stored correctly, if there is no data in the table, you can check if the IP, port, user privileges, and user password information in the configuration file plugin.conf are correct. The audit plugin's logs are printed in the fe.log of each FE, so you can also search for the keyword "audit" in fe.log and use the approach of investigating Stream Load tasks to locate the problem.
