@@ -46,7 +46,7 @@ CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
   `stmtId` INT COMMENT "SQL statement increment ID",
   `isQuery` TINYINT COMMENT "Is the SQL a query (1 or 0)",
   `feIp` VARCHAR(32) COMMENT "IP of the FE that executed the query",
-  `stmt` STRING COMMENT "Original SQL statement",
+  `stmt` VARCHAR(1048576) COMMENT "Original SQL statement",
   `digest` VARCHAR(32) COMMENT "Slow SQL fingerprint",
   `planCpuCosts` DOUBLE COMMENT "Query planning phase CPU cost (nanoseconds)",
   `planMemCosts` DOUBLE COMMENT "Query planning phase memory cost (bytes)"
@@ -105,8 +105,8 @@ max_batch_size=52428800
 # The max interval of batch loaded, default is 60 seconds.
 max_batch_interval_sec=60
 
-# the max stmt length to be loaded in audit table, default is 4096.
-max_stmt_length=4096
+# the max stmt length to be loaded in audit table, default is 1048576.
+max_stmt_length=1048576
 
 # StarRocks FE host for loading the audit, default is 127.0.0.1:8030.
 # this should be the host port for stream load.
