@@ -229,7 +229,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public String table = "starrocks_audit_tbl__";
         // the identity of FE which run this plugin
         public String feIdentity = "";
-        public int maxStmtLength = 4096;
+        public int maxStmtLength = 1048576;
         public int qeSlowLogMs = 5000;
         public int maxQueueSize = 1000;
 
