@@ -18,6 +18,11 @@
 package com.starrocks.plugin.audit;
 
 import com.starrocks.plugin.*;
+import com.starrocks.sql.ast.StatementBase;
+import com.starrocks.sql.common.SqlDigestBuilder;
+import com.starrocks.sql.parser.SqlParser;
+import org.apache.commons.codec.binary.Hex;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -32,8 +37,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -168,6 +180,11 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         auditBuffer.append(event.isQuery ? 1 : 0).append(COLUMN_SEPARATOR);
         auditBuffer.append(event.feIp).append(COLUMN_SEPARATOR);
         auditBuffer.append(truncateByBytes(event.stmt)).append(COLUMN_SEPARATOR);
+        // Compute digest for all queries
+        if (conf.enableComputeAllQueryDigest && (event.digest == null || StringUtils.isBlank(event.digest))) {
+            event.digest = computeStatementDigest(event.stmt);
+            LOG.debug("compute stmt digest, queryId: {} digest: {}", event.queryId, event.digest);
+        }
         auditBuffer.append(event.digest).append(COLUMN_SEPARATOR);
         auditBuffer.append(event.planCpuCosts).append(COLUMN_SEPARATOR);
         auditBuffer.append(event.planMemCosts).append(ROW_DELIMITER);
@@ -189,6 +206,24 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             }
         } catch (Exception e) {
             return (event.queryTime > conf.qeSlowLogMs) ? "slow_query" : "query";
+        }
+    }
+
+    private String computeStatementDigest(String stmt) {
+        List<StatementBase> stmts = SqlParser.parse(stmt, 32);
+        StatementBase queryStmt = stmts.get(stmts.size() - 1);
+
+        if (queryStmt == null) {
+            return "";
+        }
+        String digest = SqlDigestBuilder.build(queryStmt);
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            md.reset();
+            md.update(digest.getBytes());
+            return Hex.encodeHexString(md.digest());
+        } catch (NoSuchAlgorithmException e) {
+            return "";
         }
     }
 
@@ -241,6 +276,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public static final String MAX_STMT_LENGTH = "max_stmt_length";
         public static final String QE_SLOW_LOG_MS = "qe_slow_log_ms";
         public static final String MAX_QUEUE_SIZE = "max_queue_size";
+        public static final String ENABLE_COMPUTE_ALL_QUERY_DIGEST = "enable_compute_all_query_digest";
 
         public long maxBatchSize = 50 * 1024 * 1024;
         public long maxBatchIntervalSec = 60;
@@ -254,6 +290,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public int maxStmtLength = 1048576;
         public int qeSlowLogMs = 5000;
         public int maxQueueSize = 1000;
+
+        public boolean enableComputeAllQueryDigest = false;
 
         public void init(Map<String, String> properties) throws PluginException {
             try {
@@ -286,6 +324,9 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 }
                 if (properties.containsKey(MAX_QUEUE_SIZE)) {
                     maxQueueSize = Integer.parseInt(properties.get(MAX_QUEUE_SIZE));
+                }
+                if (properties.containsKey(ENABLE_COMPUTE_ALL_QUERY_DIGEST)) {
+                    enableComputeAllQueryDigest = Boolean.getBoolean(properties.get(ENABLE_COMPUTE_ALL_QUERY_DIGEST));
                 }
             } catch (Exception e) {
                 throw new PluginException(e.getMessage());
