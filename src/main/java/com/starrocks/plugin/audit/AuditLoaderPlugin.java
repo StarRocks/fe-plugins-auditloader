@@ -326,7 +326,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                     maxQueueSize = Integer.parseInt(properties.get(MAX_QUEUE_SIZE));
                 }
                 if (properties.containsKey(ENABLE_COMPUTE_ALL_QUERY_DIGEST)) {
-                    enableComputeAllQueryDigest = Boolean.getBoolean(properties.get(ENABLE_COMPUTE_ALL_QUERY_DIGEST));
+                    enableComputeAllQueryDigest = Boolean.parseBoolean(properties.get(ENABLE_COMPUTE_ALL_QUERY_DIGEST));
                 }
             } catch (Exception e) {
                 throw new PluginException(e.getMessage());
