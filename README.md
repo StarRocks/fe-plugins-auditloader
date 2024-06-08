@@ -98,23 +98,26 @@ Archive:  auditloader.zip
 ```XML
 ### plugin configuration
 
-# The max size of a batch, default is 50MB.
+# The max size of a batch, default is 50MB
 max_batch_size=52428800
 
-# The max interval of batch loaded, default is 60 seconds.
+# The max interval of batch loaded, default is 60 seconds
 max_batch_interval_sec=60
 
-# the max stmt length to be loaded in audit table, default is 1048576.
+# the max stmt length to be loaded in audit table, default is 1048576
 max_stmt_length=1048576
 
 # StarRocks FE host for loading the audit, default is 127.0.0.1:8030.
-# this should be the host port for stream load.
+# this should be the host port for stream load
 frontend_host_port=127.0.0.1:8030
 
 # If the response time of a query exceed this threshold, it will be recored in audit table as slow_query.
 qe_slow_log_ms=5000
 
-# Database of the audit table.
+# the capacity of audit queue, default is 1000
+max_queue_size=1000
+
+# Database of the audit table
 database=starrocks_audit_db__
 
 # Audit table name, to save the audit data.
@@ -123,16 +126,20 @@ table=starrocks_audit_tbl__
 # StarRocks user. This user must have import permissions for the audit table.
 user=root
 
-# StarRocks user's password.
+# StarRocks user's password
 password=
 
 # Whether to generate sql digest for all queries
 enable_compute_all_query_digest=false
+
+# Filter conditions when importing audit information
+filter=
 ```
 
 **说明**：
 1. 推荐使用参数 `frontend_host_port` 的默认配置，即 `127.0.0.1:8030` 。StarRocks 中各个 FE 是独立管理各自的审计信息的，在安装审计插件后，各个 FE 分别会启动各自的后台线程进行审计信息的获取攒批和 Stream load 写入。 `frontend_host_port` 配置项用于为插件后台 Stream Load 任务提供 http 协议的 IP 和端口，该参数不支持配置为多个值。其中，参数 IP 部分可以使用集群内任意某个 FE 的 IP，但并不推荐这样配置，因为若对应的 FE 出现异常，其他 FE 后台的审计信息写入任务也会因无法通信导致写入失败。推荐配置为默认的 `127.0.0.1:8030`，让各个 FE 均使用自身的 http 端口进行通信，以此规避其他 FE 异常时对通信的影响（当然，所有的写入任务最终都会被自动转发到 FE Leader 节点执行）。
-2. `enable_compute_all_query_digest`参数表示是否对所有查询都生成SQL指纹。
+2. `enable_compute_all_query_digest` 参数表示是否对所有查询都生成 Hash SQL 指纹（StarRocks 默认只为慢查询开启 SQL 指纹，注意如果开启该参数，指纹计算会额外占用集群内的计算资源）。
+3. `filter` 参数可以配置审计信息入库的过滤条件，该处使用 Stream Load 中 [where 参数](https://docs.mirrorship.cn/zh/docs/sql-reference/sql-statements/data-manipulation/STREAM_LOAD/#opt_properties)实现，即`-H "where: <condition>"`，配置示例：`filter=isQuery=0 and clientIp like '127.0.0.1%' and user='root'`。
 
 
 修改完成后，再将上面的三个文件重新打包为 zip 包：
@@ -196,7 +203,7 @@ JavaVersion: 1.8.31
        Name: AuditLoader
        Type: AUDIT
 Description: Available for versions 2.3+. Load audit log to starrocks, and user can view the statistic of queries.
-    Version: 4.0.0
+    Version: 4.0.1
 JavaVersion: 1.8.0
   ClassName: com.starrocks.plugin.audit.AuditLoaderPlugin
      SoName: NULL
