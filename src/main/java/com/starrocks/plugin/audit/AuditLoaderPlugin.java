@@ -187,7 +187,9 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         }
         auditBuffer.append(event.digest).append(COLUMN_SEPARATOR);
         auditBuffer.append(event.planCpuCosts).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.planMemCosts).append(ROW_DELIMITER);
+        auditBuffer.append(event.planMemCosts).append(COLUMN_SEPARATOR);
+        auditBuffer.append(event.candidateMvs).append(COLUMN_SEPARATOR);
+        auditBuffer.append(event.hitMVs).append(ROW_DELIMITER);
     }
 
     private String getQueryId(String prefix, AuditEvent event) {
