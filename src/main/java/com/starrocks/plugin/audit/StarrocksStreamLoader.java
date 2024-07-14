@@ -73,7 +73,7 @@ public class StarrocksStreamLoader {
         conn.addRequestProperty("max_filter_ratio", "1.0");
         conn.addRequestProperty("column_separator", separator);
         conn.addRequestProperty("row_delimiter", delimiter);
-        conn.addRequestProperty("columns", "queryId,timestamp,queryType,clientIp,user,authorizedUser,resourceGroup,catalog,db,state,errorCode,queryTime,scanBytes,scanRows,returnRows,cpuCostNs,memCostBytes,stmtId,isQuery,feIp,stmt,digest,planCpuCosts,planMemCosts");
+        conn.addRequestProperty("columns", "queryId,timestamp,queryType,clientIp,user,authorizedUser,resourceGroup,catalog,db,state,errorCode,queryTime,scanBytes,scanRows,returnRows,cpuCostNs,memCostBytes,stmtId,isQuery,feIp,stmt,digest,planCpuCosts,planMemCosts,pendingTimeMs");
         if(!StringUtils.isBlank(this.streamLoadFilter)) {
             conn.addRequestProperty("where", streamLoadFilter);
         }
@@ -93,8 +93,11 @@ public class StarrocksStreamLoader {
         sb.append("-H \"").append("max_filter_ratio\":").append("\"1.0\" \\\n  ");
         sb.append("-H \"").append("column_separator\":").append("\"\\x01\" \\\n  ");
         sb.append("-H \"").append("row_delimiter\":").append("\"\\x02\" \\\n  ");
+        if(!StringUtils.isBlank(this.streamLoadFilter)) {
+            sb.append("-H \"").append("where\":").append(streamLoadFilter).append(" \\\n  ");
+        }
         sb.append("-H \"").append("columns\":").append("\"queryId, timestamp, queryType, clientIp, user, authorizedUser, resourceGroup, catalog, db, state, errorCode," +
-                "queryTime, scanBytes, scanRows, returnRows, cpuCostNs, memCostBytes, stmtId, isQuery, feIp, stmt, digest, planCpuCosts, planMemCosts\" \\\n  ");
+                "queryTime, scanBytes, scanRows, returnRows, cpuCostNs, memCostBytes, stmtId, isQuery, feIp, stmt, digest, planCpuCosts, planMemCosts, pendingTimeMs\" \\\n  ");
         sb.append("\"").append(conn.getURL()).append("\"");
         return sb.toString();
     }
@@ -133,6 +136,8 @@ public class StarrocksStreamLoader {
         try {
             // build request and send to fe
             feConn = getConnection(loadUrlStr, label, separator, delimiter);
+            // print curl load command in fe.log
+            // LOG.info(toCurl(feConn));
             int status = feConn.getResponseCode();
             // fe send back http response code TEMPORARY_REDIRECT 307 and new be location, or response code HTTP_OK 200 from nginx
             if (status != TEMPORARY_REDIRECT_CODE && status != HttpURLConnection.HTTP_OK) {
