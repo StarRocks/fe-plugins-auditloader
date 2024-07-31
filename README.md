@@ -48,7 +48,9 @@ CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
   `stmt` VARCHAR(1048576) COMMENT "SQL原始语句",
   `digest` VARCHAR(32) COMMENT "慢SQL指纹",
   `planCpuCosts` DOUBLE COMMENT "查询规划阶段CPU占用（纳秒）",
-  `planMemCosts` DOUBLE COMMENT "查询规划阶段内存占用（字节）"
+  `planMemCosts` DOUBLE COMMENT "查询规划阶段内存占用（字节）",
+  `candidateMVs` varchar(65533) NULL COMMENT "候选MV列表",
+  `hitMvs` varchar(65533) NULL COMMENT "命中MV列表"
 ) ENGINE = OLAP
 DUPLICATE KEY (`queryId`, `timestamp`, `queryType`)
 COMMENT "审计日志表"
