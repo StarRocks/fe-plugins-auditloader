@@ -188,8 +188,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         auditBuffer.append(event.digest).append(COLUMN_SEPARATOR);
         auditBuffer.append(event.planCpuCosts).append(COLUMN_SEPARATOR);
         auditBuffer.append(event.planMemCosts).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.candidateMvs).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.hitMVs).append(ROW_DELIMITER);
+        auditBuffer.append(event.pendingTimeMs).append(ROW_DELIMITER);
     }
 
     private String getQueryId(String prefix, AuditEvent event) {
@@ -224,7 +223,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             md.reset();
             md.update(digest.getBytes());
             return Hex.encodeHexString(md.digest());
-        } catch (NoSuchAlgorithmException e) {
+        } catch (NoSuchAlgorithmException | NullPointerException e) {
             return "";
         }
     }
@@ -280,6 +279,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public static final String MAX_QUEUE_SIZE = "max_queue_size";
         public static final String ENABLE_COMPUTE_ALL_QUERY_DIGEST = "enable_compute_all_query_digest";
 
+        public static final String STREAM_LOAD_FILTER = "filter";
+
         public long maxBatchSize = 50 * 1024 * 1024;
         public long maxBatchIntervalSec = 60;
         public String frontendHostPort = "127.0.0.1:8030";
@@ -294,6 +295,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public int maxQueueSize = 1000;
 
         public boolean enableComputeAllQueryDigest = false;
+        public String streamLoadFilter = "";
 
         public void init(Map<String, String> properties) throws PluginException {
             try {
@@ -328,7 +330,10 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                     maxQueueSize = Integer.parseInt(properties.get(MAX_QUEUE_SIZE));
                 }
                 if (properties.containsKey(ENABLE_COMPUTE_ALL_QUERY_DIGEST)) {
-                    enableComputeAllQueryDigest = Boolean.getBoolean(properties.get(ENABLE_COMPUTE_ALL_QUERY_DIGEST));
+                    enableComputeAllQueryDigest = Boolean.parseBoolean(properties.get(ENABLE_COMPUTE_ALL_QUERY_DIGEST));
+                }
+                if (properties.containsKey(STREAM_LOAD_FILTER)) {
+                    streamLoadFilter = properties.get(STREAM_LOAD_FILTER);
                 }
             } catch (Exception e) {
                 throw new PluginException(e.getMessage());
