@@ -279,6 +279,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public static final String QE_SLOW_LOG_MS = "qe_slow_log_ms";
         public static final String MAX_QUEUE_SIZE = "max_queue_size";
         public static final String ENABLE_COMPUTE_ALL_QUERY_DIGEST = "enable_compute_all_query_digest";
+        public static final String CONNECT_TIMEOUT = "connect_timeout";
+        public static final String READ_TIMEOUT = "read_timeout";
 
         public long maxBatchSize = 50 * 1024 * 1024;
         public long maxBatchIntervalSec = 60;
@@ -294,6 +296,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public int maxQueueSize = 1000;
 
         public boolean enableComputeAllQueryDigest = false;
+        public int connectTimeout = 1000;
+        public int readTimeout = 1000;
 
         public void init(Map<String, String> properties) throws PluginException {
             try {
@@ -329,6 +333,12 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 }
                 if (properties.containsKey(ENABLE_COMPUTE_ALL_QUERY_DIGEST)) {
                     enableComputeAllQueryDigest = Boolean.getBoolean(properties.get(ENABLE_COMPUTE_ALL_QUERY_DIGEST));
+                }
+                if (properties.containsKey(CONNECT_TIMEOUT)) {
+                    connectTimeout = Integer.parseInt(properties.get(CONNECT_TIMEOUT));
+                }
+                if (properties.containsKey(READ_TIMEOUT)) {
+                    readTimeout = Integer.parseInt(properties.get(READ_TIMEOUT));
                 }
             } catch (Exception e) {
                 throw new PluginException(e.getMessage());
