@@ -21,7 +21,7 @@
 create database starrocks_audit_db__;
 ```
 
-在 `starrocks_audit_db__` 库创建 `starrocks_audit_tbl__` 表，表的属性部分可以视实际业务进行修改：
+在 `starrocks_audit_db__` 库创建 `starrocks_audit_tbl__` 表，表的字段顺序以及属性部分可以视实际业务进行修改：
 
 ```SQL
 CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
@@ -48,7 +48,10 @@ CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
   `stmt` VARCHAR(1048576) COMMENT "SQL原始语句",
   `digest` VARCHAR(32) COMMENT "慢SQL指纹",
   `planCpuCosts` DOUBLE COMMENT "查询规划阶段CPU占用（纳秒）",
-  `planMemCosts` DOUBLE COMMENT "查询规划阶段内存占用（字节）"
+  `planMemCosts` DOUBLE COMMENT "查询规划阶段内存占用（字节）",
+  `pendingTimeMs` BIGINT COMMENT "查询在队列中等待的时间（毫秒）",
+  `candidateMVs` varchar(65533) NULL COMMENT "候选MV列表",
+  `hitMvs` varchar(65533) NULL COMMENT "命中MV列表"
 ) ENGINE = OLAP
 DUPLICATE KEY (`queryId`, `timestamp`, `queryType`)
 COMMENT "审计日志表"
@@ -98,41 +101,52 @@ Archive:  auditloader.zip
 ```XML
 ### plugin configuration
 
-# The max size of a batch, default is 50MB.
+# The max size of a batch, default is 50MB
 max_batch_size=52428800
 
-# The max interval of batch loaded, default is 60 seconds.
+# The max interval of batch loaded, default is 60 seconds
 max_batch_interval_sec=60
 
-# the max stmt length to be loaded in audit table, default is 1048576.
+# the max stmt length to be loaded in audit table, default is 1048576
 max_stmt_length=1048576
 
-# StarRocks FE host for loading the audit, default is 127.0.0.1:8030.
-# this should be the host port for stream load.
+# StarRocks FE host for loading the audit, default is 127.0.0.1:8030
+# this should be the host port for stream load
 frontend_host_port=127.0.0.1:8030
 
-# If the response time of a query exceed this threshold, it will be recored in audit table as slow_query.
+# If the response time of a query exceed this threshold, it will be recored in audit table as slow_query
 qe_slow_log_ms=5000
 
-# Database of the audit table.
+# the capacity of audit queue, default is 1000
+max_queue_size=1000
+
+# Database of the audit table
 database=starrocks_audit_db__
 
-# Audit table name, to save the audit data.
+# Audit table name, to save the audit data
 table=starrocks_audit_tbl__
 
-# StarRocks user. This user must have import permissions for the audit table.
+# StarRocks user. This user must have import permissions for the audit table
 user=root
 
-# StarRocks user's password.
+# StarRocks user's password
 password=
+
+# StarRocks password encryption key, with a length not exceeding 16 bytes
+secret_key=
 
 # Whether to generate sql digest for all queries
 enable_compute_all_query_digest=false
+
+# Filter conditions when importing audit information
+filter=
 ```
 
 **说明**：
-1. 推荐使用参数 `frontend_host_port` 的默认配置，即 `127.0.0.1:8030` 。StarRocks 中各个 FE 是独立管理各自的审计信息的，在安装审计插件后，各个 FE 分别会启动各自的后台线程进行审计信息的获取攒批和 Stream load 写入。 `frontend_host_port` 配置项用于为插件后台 Stream Load 任务提供 http 协议的 IP 和端口，该参数不支持配置为多个值。其中，参数 IP 部分可以使用集群内任意某个 FE 的 IP，但并不推荐这样配置，因为若对应的 FE 出现异常，其他 FE 后台的审计信息写入任务也会因无法通信导致写入失败。推荐配置为默认的 `127.0.0.1:8030`，让各个 FE 均使用自身的 http 端口进行通信，以此规避其他 FE 异常时对通信的影响（当然，所有的写入任务最终都会被自动转发到 FE Leader 节点执行）。
-2. `enable_compute_all_query_digest`参数表示是否对所有查询都生成SQL指纹。
+1. 推荐使用参数 `frontend_host_port` 的默认配置，即 `127.0.0.1:8030` 。StarRocks 中各个 FE 是独立管理各自的审计信息的，在安装审计插件后，各个 FE 分别会启动各自的后台线程进行审计信息的获取攒批和 Stream Load 写入。 `frontend_host_port` 配置项用于为插件后台 Stream Load 任务提供 http 协议的 IP 和端口，该参数不支持配置为多个值。其中，参数 IP 部分可以使用集群内任意某个 FE 的 IP，但并不推荐这样配置，因为若对应的 FE 出现异常，其他 FE 后台的审计信息写入任务也会因无法通信导致写入失败。推荐配置为默认的 `127.0.0.1:8030`，让各个 FE 均使用自身的 http 端口进行通信，以此规避其他 FE 异常时对通信的影响（当然，所有的写入任务最终都会被自动转发到 FE Leader 节点执行）。
+2. `secret_key` 参数用于配置"加密密码的 key 字符串"，在审计插件中其长度不得超过 16 个字节。如果该参数留空，表示不对 `plugin.conf` 中的密码进行加解密，在 password 处直接配置明文密码即可。如果该参数不为空，表示需要对密码进行加解密，password 处需配置为加密后的字符串，加密后的密码可在 StarRocks 中通过 `AES_ENCRYPT` 函数生成：`SELECT TO_BASE64(AES_ENCRYPT('password','secret_key'));`。
+3. `enable_compute_all_query_digest` 参数表示是否对所有查询都生成 Hash SQL 指纹（StarRocks 默认只为慢查询开启 SQL 指纹，注意插件中的指纹计算方法与 FE 内部的方法不一致，FE 会对 SQL 语句[规范化处理](https://docs.mirrorship.cn/zh/docs/administration/Query_planning/#%E6%9F%A5%E7%9C%8B-sql-%E6%8C%87%E7%BA%B9)，而插件不会，且如果开启该参数，指纹计算会额外占用集群内的计算资源）。
+4. `filter` 参数可以配置审计信息入库的过滤条件，该处使用 Stream Load 中 [where 参数](https://docs.mirrorship.cn/zh/docs/sql-reference/sql-statements/data-manipulation/STREAM_LOAD/#opt_properties)实现，即`-H "where: <condition>"`，默认为空，配置示例：`filter=isQuery=1 and clientIp like '127.0.0.1%' and user='root'`。
 
 
 修改完成后，再将上面的三个文件重新打包为 zip 包：
@@ -147,13 +161,13 @@ enable_compute_all_query_digest=false
 
 ##### 3、分发插件
 
-将 auditloader.zip 分发至集群所有 FE 节点，各节点分发路径需要一致。例如我们都分发至StarRocks部署目录 `/opt/module/starrocks/` 下，也即 auditloader.zip 文件在集群所有FE节点的路径都为：
+将 auditloader.zip 分发至集群所有 FE 节点，各节点分发路径需要一致。例如都分发至StarRocks部署目录 `/opt/module/starrocks/` 下，也即 auditloader.zip 文件在集群所有FE节点的路径都为：
 
 ```
 /opt/module/starrocks/auditloader.zip
 ```
 
-**说明**：也可将 auditloader.zip 分发至所有 FE 都可访问到的 http 服务中（例如 httpd 或 nginx），然后使用网络路径安装。
+**说明**：也可将 auditloader.zip 分发至所有 FE 都可访问到的 http 服务中（例如 httpd 或 nginx），然后使用网络路径安装。注意这两种方式下 auditloader.zip 在执行安装后都需要在该路径下持续保留，不可在安装后删除源文件。
 
 
 
@@ -195,8 +209,8 @@ JavaVersion: 1.8.31
 *************************** 2. row ***************************
        Name: AuditLoader
        Type: AUDIT
-Description: Available for versions 2.3+. Load audit log to starrocks, and user can view the statistic of queries.
-    Version: 4.0.0
+Description: Available for versions 2.5+. Load audit log to starrocks, and user can view the statistic of queries
+    Version: 4.2.1
 JavaVersion: 1.8.0
   ClassName: com.starrocks.plugin.audit.AuditLoaderPlugin
      SoName: NULL
@@ -250,5 +264,21 @@ mysql> select * from starrocks_audit_db__.starrocks_audit_tbl__;
 
 StarRocks审计表中支持的 `queryType` 类型包括：query、slow_query 和 connection。对于 query 和 slow_query，AuditLoader 插件使用 `plugin.conf` 中配置的 `qe_slow_log_ms` 时间来进行对比判断，SQL 执行时长大于 `qe_slow_log_ms` 的即为 slow_query，您可以以此进行集群慢 SQL 的统计。
 
-对于 connection，StarRocks 3.0.6+ 版本支持在 fe.audit.log 中打印客户端连接时成功/失败的 connection 信息，您可以在 `fe.conf` 里配置 `audit_log_modules=slow_query, query, connection`，然后重启 FE 来进行启用。在启用 connection 信息后，AuditLoader 插件同样能采集到这类客户端连接信息并入库到表 `starrocks_audit_tbl__` 中，入库后该类信息对应的审计表的 `queryType` 字段即为 connection，您可以以此进行用户登录信息的审计。
+对于 connection，StarRocks 3.0.6+ 版本支持在 fe.audit.log 中打印客户端连接时成功/失败的 connection 信息，您可以在 `fe.conf` 里配置 `audit_log_modules=slow_query,query,connection`，然后重启 FE 来进行启用。在启用 connection 信息后，AuditLoader 插件同样能采集到这类客户端连接信息并入库到表 `starrocks_audit_tbl__` 中，入库后该类信息对应的审计表的 `queryType` 字段即为 connection，您可以以此进行用户登录信息的审计。
+
+
+
+### 更新说明：
+
+##### AuditLoader  v4.2.1
+
+1）新增在 plugin.conf 中配置密文密码的功能
+
+2）在审计日志表中预留增加了 candidateMVs 和 hitMvs 两个重要监测字段
+
+3）新增在 plugin.conf 中通过 filter 参数进行审计信息的入库条件筛选功能
+
+4）调整插件攒批逻辑为 Json，规避 StarRocks 3.2.12+ 等版本 FE netty 依赖升级导致的原 CSV 攒批逻辑在写入时报错 `Validation failed for header 'column_separator'` 的问题
+
+5）其他细节优化
 
