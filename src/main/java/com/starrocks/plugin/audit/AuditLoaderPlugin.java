@@ -137,7 +137,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         isClosed = true;
         if (loadThread != null) {
             try {
-                loadThread.join();
+                loadThread.join(60000);
             } catch (InterruptedException e) {
                 LOG.debug("encounter exception when closing the audit loader", e);
             }
