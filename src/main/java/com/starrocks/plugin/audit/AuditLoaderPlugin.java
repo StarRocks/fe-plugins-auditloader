@@ -52,6 +52,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+//ADDED PUMA
+import java.util.concurrent.Future;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.starrocks.plugin.audit.model.QueryEventData;
+
 /*
  * This plugin will load audit log to specified starrocks table at specified interval
  */
@@ -329,6 +339,11 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public static final String PROP_SECRET_KEY = "secret_key";
         public String secretKey = "";
 
+        //ADDED PUMA
+        public static String PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG = "fe.plugins.auditloader.bootstrapServer";
+        public static String PUMA_KAFKA_TOPIC = "fe.plugins.auditloader.kafkaTopic";
+        public static String PUMA_KAFKA_INSTANCE_NAME = "fe.plugins.auditloader.instanceName";
+
         public void init(Map<String, String> properties) throws PluginException {
             try {
                 if (properties.containsKey(PROP_MAX_BATCH_SIZE)) {
@@ -373,6 +388,16 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 if (properties.containsKey(STREAM_LOAD_FILTER)) {
                     streamLoadFilter = properties.get(STREAM_LOAD_FILTER);
                 }
+                //ADDED PUMA
+                if (properties.containsKey(PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG)) {
+                    PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG = properties.get(PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG);
+                }
+                if (properties.containsKey(PUMA_KAFKA_TOPIC)) {
+                    PUMA_KAFKA_TOPIC = properties.get(PUMA_KAFKA_TOPIC);
+                }
+                if (properties.containsKey(PUMA_KAFKA_INSTANCE_NAME)) {
+                    PUMA_KAFKA_INSTANCE_NAME = properties.get(PUMA_KAFKA_INSTANCE_NAME);
+                }
             } catch (Exception e) {
                 throw new PluginException(e.getMessage());
             }
@@ -392,6 +417,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                     AuditEvent event = auditEventQueue.poll(5, TimeUnit.SECONDS);
                     if (event != null) {
                         assembleAudit(event);
+                        //ADDED PUMA
+                        sendToKafka(event);
                     }
                     loadIfNecessary(loader);
                 } catch (InterruptedException ie) {
@@ -408,6 +435,89 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             return DATETIME_FORMAT.format(new Date());
         }
         return DATETIME_FORMAT.format(new Date(timeStamp));
+    }
+
+    //ADDED PUMA
+
+    public void sendToKafka(AuditEvent event){
+
+        Properties properties = new Properties();
+        properties.setProperty("bootstrap.servers", AuditLoaderConf.PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG);
+        properties.setProperty("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        properties.setProperty("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        properties.setProperty("max.request.size", "52428800");
+        properties.setProperty("buffer.memory", "36700160");
+        properties.setProperty("max.block.ms", "180000");
+        properties.setProperty("batch.size", "102400");
+        properties.setProperty("compression.type", "snappy");
+        properties.setProperty("linger.ms", "20");
+        properties.setProperty("security.protocol","SASL_SSL");
+        properties.setProperty("sasl.mechanism","AWS_MSK_IAM");
+        properties.setProperty("sasl.jaas.config","software.amazon.msk.auth.iam.IAMLoginModule required;");
+        properties.setProperty("sasl.client.callback.handler.class","software.amazon.msk.auth.iam.IAMClientCallbackHandler");
+
+        String queryType = getQueryType(event);
+        String eventAuditId = getQueryId(queryType,event);
+
+        QueryEventData eventAuditEG = new QueryEventData();
+        eventAuditEG.setId(eventAuditId);
+        eventAuditEG.setInstanceName(AuditLoaderConf.PUMA_KAFKA_INSTANCE_NAME);
+        eventAuditEG.setTimestamp(longToTimeString(event.timestamp));
+        eventAuditEG.setQueryType(queryType);
+        eventAuditEG.setClientIp(event.clientIp);
+        eventAuditEG.setUser(event.user);
+        eventAuditEG.setAuthorizedUser(event.authorizedUser);
+        eventAuditEG.setResourceGroup(event.resourceGroup);
+        eventAuditEG.setCatalog(event.catalog);
+        eventAuditEG.setDb(event.db);
+        eventAuditEG.setState(event.state);
+        eventAuditEG.setErrorCode(event.errorCode);
+        eventAuditEG.setQueryTime(event.queryTime);
+        eventAuditEG.setScanBytes(event.scanBytes);
+        eventAuditEG.setScanRows(event.scanRows);
+        eventAuditEG.setReturnRows(event.returnRows);
+        eventAuditEG.setCpuCostNs(event.cpuCostNs);
+        eventAuditEG.setMemCostBytes(event.memCostBytes);
+        eventAuditEG.setStmtId(event.stmtId);
+        eventAuditEG.setIsQuery(event.isQuery ? true : false);
+        eventAuditEG.setFeIp(event.feIp);
+        eventAuditEG.setStmt(truncateByBytes(event.stmt));
+        // Compute digest for all queries
+        if (conf.enableComputeAllQueryDigest && (event.digest == null || StringUtils.isBlank(event.digest))) {
+            event.digest = computeStatementDigest(event.stmt);
+            LOG.debug("compute stmt digest, queryId: {} digest: {}", event.queryId, event.digest);
+        }
+        eventAuditEG.setDigest(event.digest);
+        eventAuditEG.setPlanCpuCosts(event.planCpuCosts);
+        eventAuditEG.setPlanMemCosts(event.planMemCosts);
+        eventAuditEG.setCandidateMvs(event.candidateMvs);
+        eventAuditEG.setHitMVs(event.hitMVs);
+
+        ObjectMapper mapperEventAuditEG = new ObjectMapper();
+        mapperEventAuditEG.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+
+        try {
+            Producer<String, String> producer = new KafkaProducer<>(properties);
+            Future<RecordMetadata> res = producer.send(
+                new ProducerRecord<>(
+                    AuditLoaderConf.PUMA_KAFKA_TOPIC, 
+                    eventAuditId, 
+                    mapperEventAuditEG.writeValueAsString(eventAuditEG)));
+            try {
+                RecordMetadata metadata = res.get();
+                if (metadata.hasOffset()){
+                    LOG.info("Query created event with id: " + eventAuditId +  " in partition: "+ String.valueOf(metadata.partition())  + " with offset: " + metadata.offset());
+                } else {
+                    LOG.error("Query created event with id: " + eventAuditId +  " doesn't have offset. It wasn't sent to the topic. ");
+                }
+            } catch (InterruptedException | ExecutionException e) {
+                LOG.error(String.format("Query id: "+ eventAuditId + " Not written to kafka topic - Error of interrupted execution on sendToKafka method: %s", e.getMessage()));
+            }
+            producer.close();
+        } catch (Exception e) {
+            LOG.error(String.format("Error on sending to kafka: %s", e.getMessage()));
+        }
+
     }
 
 }
