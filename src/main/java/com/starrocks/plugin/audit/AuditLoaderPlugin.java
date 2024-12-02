@@ -52,7 +52,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-//ADDED PUMA
 import java.util.concurrent.Future;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -61,6 +60,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.starrocks.plugin.audit.model.QueryEventData;
+import java.util.concurrent.ExecutionException;
 
 /*
  * This plugin will load audit log to specified starrocks table at specified interval
@@ -79,6 +79,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
     private AuditLoaderConf conf;
     private volatile boolean isClosed = false;
     private volatile boolean isInit = false;
+
+    public static boolean kafkaEnable = false;
 
     /**
      * 是否包含新字段 candidateMvs，如果旧版本没有该字段则值为空
@@ -339,10 +341,22 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public static final String PROP_SECRET_KEY = "secret_key";
         public String secretKey = "";
 
-        //ADDED PUMA
-        public static String PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG = "fe.plugins.auditloader.bootstrapServer";
-        public static String PUMA_KAFKA_TOPIC = "fe.plugins.auditloader.kafkaTopic";
-        public static String PUMA_KAFKA_INSTANCE_NAME = "fe.plugins.auditloader.instanceName";
+        public static String PROP_KAFKA_ENABLE = "kafka_enableMSK";
+        public static String PROP_KAFKA_INSTANCE_NAME = "kafka_instanceName";
+        public static String PROP_KAFKA_TOPIC = "kafka_topic";
+        public static String PROP_KAFKA_BOOTSTRAP_SERVERS = "kafka_bootstrapServer";
+        public static String PROP_KAFKA_CONF_KEYSERIALIZER = "kafka_conf_keySerializer";
+        public static String PROP_KAFKA_CONF_VALUESERIALIZER = "kafka_conf_valueSerializer";
+        public static String PROP_KAFKA_CONF_MAXREQUESTSIZE = "kafka_conf_maxRequestSize";
+        public static String PROP_KAFKA_CONF_BUFFERMEMORY = "kafka_conf_bufferMemory";
+        public static String PROP_KAFKA_CONF_MAXBLOCKMS = "kafka_conf_maxBlockMs";
+        public static String PROP_KAFKA_CONF_BATCHSIZE = "kafka_conf_batchSize";
+        public static String PROP_KAFKA_CONF_COMPRESSIONTYPE = "kafka_conf_compressionType";
+        public static String PROP_KAFKA_CONF_LINGERMS = "kafka_conf_lingerMs";
+        public static String PROP_KAFKA_CONF_SECURITYPROTOCOL = "kafka_conf_securityProtocol";
+        public static String PROP_KAFKA_CONF_SASLMECHANISM = "kafka_conf_saslMechanism";
+        public static String PROP_KAFKA_CONF_SASLJAASCONFIG = "kafka_conf_saslJaasConfig";
+        public static String PROP_KAFKA_CONF_SASLCLIENTCALLBACKHANDLERCLASS = "kafka_conf_saslClientCallbackHandlerClass";
 
         public void init(Map<String, String> properties) throws PluginException {
             try {
@@ -388,15 +402,53 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 if (properties.containsKey(STREAM_LOAD_FILTER)) {
                     streamLoadFilter = properties.get(STREAM_LOAD_FILTER);
                 }
-                //ADDED PUMA
-                if (properties.containsKey(PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG)) {
-                    PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG = properties.get(PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG);
+                if (properties.containsKey(PROP_KAFKA_ENABLE)) {
+                    kafkaEnable = Boolean.parseBoolean(properties.get(PROP_KAFKA_ENABLE));
                 }
-                if (properties.containsKey(PUMA_KAFKA_TOPIC)) {
-                    PUMA_KAFKA_TOPIC = properties.get(PUMA_KAFKA_TOPIC);
+                if (properties.containsKey(PROP_KAFKA_INSTANCE_NAME)) {
+                    PROP_KAFKA_INSTANCE_NAME = properties.get(PROP_KAFKA_INSTANCE_NAME);
                 }
-                if (properties.containsKey(PUMA_KAFKA_INSTANCE_NAME)) {
-                    PUMA_KAFKA_INSTANCE_NAME = properties.get(PUMA_KAFKA_INSTANCE_NAME);
+                if (properties.containsKey(PROP_KAFKA_TOPIC)) {
+                    PROP_KAFKA_TOPIC = properties.get(PROP_KAFKA_TOPIC);
+                }
+                if (properties.containsKey(PROP_KAFKA_BOOTSTRAP_SERVERS)) {
+                    PROP_KAFKA_BOOTSTRAP_SERVERS = properties.get(PROP_KAFKA_BOOTSTRAP_SERVERS);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_KEYSERIALIZER)) {
+                    PROP_KAFKA_CONF_KEYSERIALIZER = properties.get(PROP_KAFKA_CONF_KEYSERIALIZER);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_VALUESERIALIZER)) {
+                    PROP_KAFKA_CONF_VALUESERIALIZER = properties.get(PROP_KAFKA_CONF_VALUESERIALIZER);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_MAXREQUESTSIZE)) {
+                    PROP_KAFKA_CONF_MAXREQUESTSIZE = properties.get(PROP_KAFKA_CONF_MAXREQUESTSIZE);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_BUFFERMEMORY)) {
+                    PROP_KAFKA_CONF_BUFFERMEMORY = properties.get(PROP_KAFKA_CONF_BUFFERMEMORY);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_MAXBLOCKMS)) {
+                    PROP_KAFKA_CONF_MAXBLOCKMS = properties.get(PROP_KAFKA_CONF_MAXBLOCKMS);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_BATCHSIZE)) {
+                    PROP_KAFKA_CONF_BATCHSIZE = properties.get(PROP_KAFKA_CONF_BATCHSIZE);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_COMPRESSIONTYPE)) {
+                    PROP_KAFKA_CONF_COMPRESSIONTYPE = properties.get(PROP_KAFKA_CONF_COMPRESSIONTYPE);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_LINGERMS)) {
+                    PROP_KAFKA_CONF_LINGERMS = properties.get(PROP_KAFKA_CONF_LINGERMS);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_SECURITYPROTOCOL)) {
+                    PROP_KAFKA_CONF_SECURITYPROTOCOL = properties.get(PROP_KAFKA_CONF_SECURITYPROTOCOL);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_SASLMECHANISM)) {
+                    PROP_KAFKA_CONF_SASLMECHANISM = properties.get(PROP_KAFKA_CONF_SASLMECHANISM);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_SASLJAASCONFIG)) {
+                    PROP_KAFKA_CONF_SASLJAASCONFIG = properties.get(PROP_KAFKA_CONF_SASLJAASCONFIG);
+                }
+                if (properties.containsKey(PROP_KAFKA_CONF_SASLCLIENTCALLBACKHANDLERCLASS)) {
+                    PROP_KAFKA_CONF_SASLCLIENTCALLBACKHANDLERCLASS = properties.get(PROP_KAFKA_CONF_SASLCLIENTCALLBACKHANDLERCLASS);
                 }
             } catch (Exception e) {
                 throw new PluginException(e.getMessage());
@@ -417,8 +469,9 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                     AuditEvent event = auditEventQueue.poll(5, TimeUnit.SECONDS);
                     if (event != null) {
                         assembleAudit(event);
-                        //ADDED PUMA
-                        sendToKafka(event);
+                        if (kafkaEnable) {
+                            sendToKafka(event);
+                        }
                     }
                     loadIfNecessary(loader);
                 } catch (InterruptedException ie) {
@@ -437,31 +490,29 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         return DATETIME_FORMAT.format(new Date(timeStamp));
     }
 
-    //ADDED PUMA
-
     public void sendToKafka(AuditEvent event){
 
         Properties properties = new Properties();
-        properties.setProperty("bootstrap.servers", AuditLoaderConf.PUMA_KAFKA_BOOTSTRAP_SERVERS_CONFIG);
-        properties.setProperty("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        properties.setProperty("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        properties.setProperty("max.request.size", "52428800");
-        properties.setProperty("buffer.memory", "36700160");
-        properties.setProperty("max.block.ms", "180000");
-        properties.setProperty("batch.size", "102400");
-        properties.setProperty("compression.type", "snappy");
-        properties.setProperty("linger.ms", "20");
-        properties.setProperty("security.protocol","SASL_SSL");
-        properties.setProperty("sasl.mechanism","AWS_MSK_IAM");
-        properties.setProperty("sasl.jaas.config","software.amazon.msk.auth.iam.IAMLoginModule required;");
-        properties.setProperty("sasl.client.callback.handler.class","software.amazon.msk.auth.iam.IAMClientCallbackHandler");
+        properties.setProperty("bootstrap.servers", AuditLoaderConf.PROP_KAFKA_BOOTSTRAP_SERVERS);
+        properties.setProperty("key.serializer",  AuditLoaderConf.PROP_KAFKA_CONF_KEYSERIALIZER);
+        properties.setProperty("value.serializer",  AuditLoaderConf.PROP_KAFKA_CONF_VALUESERIALIZER);
+        properties.setProperty("max.request.size", AuditLoaderConf.PROP_KAFKA_CONF_MAXREQUESTSIZE);
+        properties.setProperty("buffer.memory", AuditLoaderConf.PROP_KAFKA_CONF_BUFFERMEMORY);
+        properties.setProperty("max.block.ms", AuditLoaderConf.PROP_KAFKA_CONF_MAXBLOCKMS);
+        properties.setProperty("batch.size", AuditLoaderConf.PROP_KAFKA_CONF_BATCHSIZE);
+        properties.setProperty("compression.type", AuditLoaderConf.PROP_KAFKA_CONF_COMPRESSIONTYPE);
+        properties.setProperty("linger.ms", AuditLoaderConf.PROP_KAFKA_CONF_LINGERMS);
+        properties.setProperty("security.protocol",AuditLoaderConf.PROP_KAFKA_CONF_SECURITYPROTOCOL);
+        properties.setProperty("sasl.mechanism",AuditLoaderConf.PROP_KAFKA_CONF_SASLMECHANISM);
+        properties.setProperty("sasl.jaas.config",AuditLoaderConf.PROP_KAFKA_CONF_SASLJAASCONFIG);
+        properties.setProperty("sasl.client.callback.handler.class",AuditLoaderConf.PROP_KAFKA_CONF_SASLCLIENTCALLBACKHANDLERCLASS);
 
         String queryType = getQueryType(event);
         String eventAuditId = getQueryId(queryType,event);
 
         QueryEventData eventAuditEG = new QueryEventData();
         eventAuditEG.setId(eventAuditId);
-        eventAuditEG.setInstanceName(AuditLoaderConf.PUMA_KAFKA_INSTANCE_NAME);
+        eventAuditEG.setInstanceName(AuditLoaderConf.PROP_KAFKA_INSTANCE_NAME);
         eventAuditEG.setTimestamp(longToTimeString(event.timestamp));
         eventAuditEG.setQueryType(queryType);
         eventAuditEG.setClientIp(event.clientIp);
@@ -482,7 +533,6 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         eventAuditEG.setIsQuery(event.isQuery ? true : false);
         eventAuditEG.setFeIp(event.feIp);
         eventAuditEG.setStmt(truncateByBytes(event.stmt));
-        // Compute digest for all queries
         if (conf.enableComputeAllQueryDigest && (event.digest == null || StringUtils.isBlank(event.digest))) {
             event.digest = computeStatementDigest(event.stmt);
             LOG.debug("compute stmt digest, queryId: {} digest: {}", event.queryId, event.digest);
@@ -500,7 +550,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             Producer<String, String> producer = new KafkaProducer<>(properties);
             Future<RecordMetadata> res = producer.send(
                 new ProducerRecord<>(
-                    AuditLoaderConf.PUMA_KAFKA_TOPIC, 
+                    AuditLoaderConf.PROP_KAFKA_TOPIC, 
                     eventAuditId, 
                     mapperEventAuditEG.writeValueAsString(eventAuditEG)));
             try {
