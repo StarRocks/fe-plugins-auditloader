@@ -196,7 +196,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 "\"planMemCosts\":" + event.planMemCosts + "," +
                 "\"pendingTimeMs\":" + event.pendingTimeMs + "," +
                 "\"candidateMVs\":\"" + candidateMvsVal + "\"," +
-                "\"hitMvs\":\"" + hitMVsVal + "\"}";
+                "\"hitMvs\":\"" + hitMVsVal + "\"," +
+                "\"warehouse\":\"" + event.warehouse + "\"}";
         if (auditBuffer.length() > 0) {
             auditBuffer.append(",");
         }
