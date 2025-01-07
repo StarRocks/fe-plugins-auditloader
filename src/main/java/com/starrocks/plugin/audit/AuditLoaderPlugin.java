@@ -26,8 +26,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
@@ -40,16 +43,13 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Properties;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /*
@@ -71,13 +71,13 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
     private volatile boolean isInit = false;
 
     /**
-     * 列分隔符
+     * 是否包含新字段 candidateMvs，如果旧版本没有该字段则值为空
      */
-    private static final char COLUMN_SEPARATOR = 0x01;
+    private boolean candidateMvsExists;
     /**
-     * 行分隔符
+     * 是否包含新字段 hitMVsExists，如果旧版本没有该字段则值为空
      */
-    private static final char ROW_DELIMITER = 0x02;
+    private boolean hitMVsExists;
 
     @Override
     public void init(PluginInfo info, PluginContext ctx) throws PluginException {
@@ -94,6 +94,9 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             this.streamLoader = new StarrocksStreamLoader(conf);
             this.loadThread = new Thread(new LoadWorker(this.streamLoader), "audit loader thread");
             this.loadThread.start();
+
+            candidateMvsExists = hasField(AuditEvent.class, "candidateMvs");
+            hitMVsExists = hasField(AuditEvent.class, "hitMVs");
 
             isInit = true;
         }
@@ -134,7 +137,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         isClosed = true;
         if (loadThread != null) {
             try {
-                loadThread.join();
+                loadThread.join(60000);
             } catch (InterruptedException e) {
                 LOG.debug("encounter exception when closing the audit loader", e);
             }
@@ -159,37 +162,45 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
 
     private void assembleAudit(AuditEvent event) {
         String queryType = getQueryType(event);
-        auditBuffer.append(getQueryId(queryType,event)).append(COLUMN_SEPARATOR);
-        auditBuffer.append(longToTimeString(event.timestamp)).append(COLUMN_SEPARATOR);
-        auditBuffer.append(queryType).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.clientIp).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.user).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.authorizedUser).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.resourceGroup).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.catalog).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.db).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.state).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.errorCode).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.queryTime).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.scanBytes).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.scanRows).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.returnRows).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.cpuCostNs).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.memCostBytes).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.stmtId).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.isQuery ? 1 : 0).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.feIp).append(COLUMN_SEPARATOR);
-        auditBuffer.append(truncateByBytes(event.stmt)).append(COLUMN_SEPARATOR);
+        int isQuery = event.isQuery ? 1 : 0;
         // Compute digest for all queries
         if (conf.enableComputeAllQueryDigest && (event.digest == null || StringUtils.isBlank(event.digest))) {
             event.digest = computeStatementDigest(event.stmt);
             LOG.debug("compute stmt digest, queryId: {} digest: {}", event.queryId, event.digest);
         }
-        auditBuffer.append(event.digest).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.planCpuCosts).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.planMemCosts).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.candidateMvs).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.hitMVs).append(ROW_DELIMITER);
+        String candidateMvsVal = candidateMvsExists ? event.candidateMvs : "";
+        String hitMVsVal = hitMVsExists ? event.hitMVs : "";
+        String content = "{\"queryId\":\"" + getQueryId(queryType, event) + "\"," +
+                "\"timestamp\":\"" + longToTimeString(event.timestamp) + "\"," +
+                "\"queryType\":\"" + queryType + "\"," +
+                "\"clientIp\":\"" + event.clientIp + "\"," +
+                "\"user\":\"" + event.user + "\"," +
+                "\"authorizedUser\":\"" + event.authorizedUser + "\"," +
+                "\"resourceGroup\":\"" + event.resourceGroup + "\"," +
+                "\"catalog\":\"" + event.catalog + "\"," +
+                "\"db\":\"" + event.db + "\"," +
+                "\"state\":\"" + event.state + "\"," +
+                "\"errorCode\":\"" + event.errorCode + "\"," +
+                "\"queryTime\":" + event.queryTime + "," +
+                "\"scanBytes\":" + event.scanBytes + "," +
+                "\"scanRows\":" + event.scanRows + "," +
+                "\"returnRows\":" + event.returnRows + "," +
+                "\"cpuCostNs\":" + event.cpuCostNs + "," +
+                "\"memCostBytes\":" + event.memCostBytes + "," +
+                "\"stmtId\":" + event.stmtId + "," +
+                "\"isQuery\":" + isQuery + "," +
+                "\"feIp\":\"" + event.feIp + "\"," +
+                "\"stmt\":\"" + truncateByBytes(event.stmt) + "\"," +
+                "\"digest\":\"" + event.digest + "\"," +
+                "\"planCpuCosts\":" + event.planCpuCosts + "," +
+                "\"planMemCosts\":" + event.planMemCosts + "," +
+                "\"pendingTimeMs\":" + event.pendingTimeMs + "," +
+                "\"candidateMVs\":\"" + candidateMvsVal + "\"," +
+                "\"hitMvs\":\"" + hitMVsVal + "\"}";
+        if (auditBuffer.length() > 0) {
+            auditBuffer.append(",");
+        }
+        auditBuffer.append(content);
     }
 
     private String getQueryId(String prefix, AuditEvent event) {
@@ -224,7 +235,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             md.reset();
             md.update(digest.getBytes());
             return Hex.encodeHexString(md.digest());
-        } catch (NoSuchAlgorithmException e) {
+        } catch (NoSuchAlgorithmException | NullPointerException e) {
             return "";
         }
     }
@@ -249,14 +260,14 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         if (auditBuffer.length() < conf.maxBatchSize && System.currentTimeMillis() - lastLoadTime < conf.maxBatchIntervalSec * 1000) {
             return;
         }
-        if(auditBuffer.length() == 0) {
+        if (auditBuffer.length() == 0) {
             return;
         }
 
         lastLoadTime = System.currentTimeMillis();
         // begin to load
         try {
-            StarrocksStreamLoader.LoadResponse response = loader.loadBatch(auditBuffer, String.valueOf(COLUMN_SEPARATOR), String.valueOf(ROW_DELIMITER));
+            StarrocksStreamLoader.LoadResponse response = loader.loadBatch(auditBuffer);
             LOG.debug("audit loader response: {}", response);
         } catch (Exception e) {
             LOG.error("encounter exception when putting current audit batch, discard current batch", e);
@@ -264,6 +275,23 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             // make a new string builder to receive following events.
             this.auditBuffer = new StringBuilder();
         }
+    }
+
+    /**
+     * 类中是否包含指定字段
+     *
+     * @param clazz
+     * @param fieldName
+     * @return
+     */
+    private boolean hasField(Class<?> clazz, String fieldName) {
+        Field[] fields = clazz.getDeclaredFields();
+        for (Field field : fields) {
+            if (field.getName().equals(fieldName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static class AuditLoaderConf {
@@ -282,6 +310,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public static final String CONNECT_TIMEOUT = "connect_timeout";
         public static final String READ_TIMEOUT = "read_timeout";
 
+        public static final String STREAM_LOAD_FILTER = "filter";
+
         public long maxBatchSize = 50 * 1024 * 1024;
         public long maxBatchIntervalSec = 60;
         public String frontendHostPort = "127.0.0.1:8030";
@@ -296,8 +326,13 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public int maxQueueSize = 1000;
 
         public boolean enableComputeAllQueryDigest = false;
+
         public int connectTimeout = 1000;
         public int readTimeout = 1000;
+        public String streamLoadFilter = "";
+
+        public static final String PROP_SECRET_KEY = "secret_key";
+        public String secretKey = "";
 
         public void init(Map<String, String> properties) throws PluginException {
             try {
@@ -319,6 +354,12 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 if (properties.containsKey(PROP_PASSWORD)) {
                     password = properties.get(PROP_PASSWORD);
                 }
+                if (properties.containsKey(PROP_SECRET_KEY)) {
+                    secretKey = properties.get(PROP_SECRET_KEY);
+                    if (secretKey.getBytes(StandardCharsets.UTF_8).length > 16) {
+                        throw new PluginException("the maximum length of the key cannot exceed 16 bytes");
+                    }
+                }
                 if (properties.containsKey(PROP_DATABASE)) {
                     database = properties.get(PROP_DATABASE);
                 }
@@ -332,7 +373,10 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                     maxQueueSize = Integer.parseInt(properties.get(MAX_QUEUE_SIZE));
                 }
                 if (properties.containsKey(ENABLE_COMPUTE_ALL_QUERY_DIGEST)) {
-                    enableComputeAllQueryDigest = Boolean.getBoolean(properties.get(ENABLE_COMPUTE_ALL_QUERY_DIGEST));
+                    enableComputeAllQueryDigest = Boolean.parseBoolean(properties.get(ENABLE_COMPUTE_ALL_QUERY_DIGEST));
+                }
+                if (properties.containsKey(STREAM_LOAD_FILTER)) {
+                    streamLoadFilter = properties.get(STREAM_LOAD_FILTER);
                 }
                 if (properties.containsKey(CONNECT_TIMEOUT)) {
                     connectTimeout = Integer.parseInt(properties.get(CONNECT_TIMEOUT));
@@ -376,4 +420,5 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         }
         return DATETIME_FORMAT.format(new Date(timeStamp));
     }
+
 }

@@ -17,6 +17,7 @@
 
 package com.starrocks.plugin.audit;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -29,10 +30,12 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Calendar;
+import java.util.UUID;
 
 public class StarrocksStreamLoader {
     private final static Logger LOG = LogManager.getLogger(StarrocksStreamLoader.class);
     private static String loadUrlPattern = "http://%s/api/%s/%s/_stream_load?";
+    private static Integer TEMPORARY_REDIRECT_CODE = 307;
     private String hostPort;
     private String db;
     private String tbl;
@@ -41,8 +44,11 @@ public class StarrocksStreamLoader {
     private String loadUrlStr;
     private String authEncoding;
     private String feIdentity;
+
     private int connectTimeout;
     private int readTimeout;
+
+    private String streamLoadFilter;
 
     public StarrocksStreamLoader(AuditLoaderPlugin.AuditLoaderConf conf) {
         this.hostPort = conf.frontendHostPort;
@@ -52,15 +58,25 @@ public class StarrocksStreamLoader {
         this.passwd = conf.password;
 
         this.loadUrlStr = String.format(loadUrlPattern, hostPort, db, tbl);
+        String secretKey = conf.secretKey;
+        if(!StringUtils.isBlank(secretKey.trim())) {
+            try {
+                this.passwd = DecryptUtil.decrypt(this.passwd, DecryptUtil.fillByte(secretKey.getBytes(), 16));
+            } catch (Exception e) {
+                LOG.error("AuditLoader plugin decrypt password error ", e);
+            }
+        }
         this.authEncoding = Base64.getEncoder().encodeToString(String.format("%s:%s", user, passwd).getBytes(StandardCharsets.UTF_8));
         // currently, FE identity is FE's IP, so we replace the "." in IP to make it suitable for label
         this.feIdentity = conf.feIdentity.replaceAll("\\.", "_");
 
         this.connectTimeout = conf.connectTimeout;
         this.readTimeout = conf.readTimeout;
+      
+        this.streamLoadFilter = conf.streamLoadFilter;
     }
 
-    private HttpURLConnection getConnection(String urlStr, String label, String separator, String delimiter) throws IOException {
+    private HttpURLConnection getConnection(String urlStr, String label) throws IOException {
         URL url = new URL(urlStr);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setInstanceFollowRedirects(false);
@@ -68,11 +84,15 @@ public class StarrocksStreamLoader {
         conn.setRequestProperty("Authorization", "Basic " + authEncoding);
         conn.addRequestProperty("Expect", "100-continue");
         conn.addRequestProperty("Content-Type", "text/plain; charset=UTF-8");
+        conn.addRequestProperty("format", "json");
+        conn.addRequestProperty("strip_outer_array", "true");
 
         conn.addRequestProperty("label", label);
         conn.addRequestProperty("max_filter_ratio", "1.0");
-        conn.addRequestProperty("column_separator", separator);
-        conn.addRequestProperty("row_delimiter", delimiter);
+        conn.addRequestProperty("columns", "queryId,timestamp,queryType,clientIp,user,authorizedUser,resourceGroup,catalog,db,state,errorCode,queryTime,scanBytes,scanRows,returnRows,cpuCostNs,memCostBytes,stmtId,isQuery,feIp,stmt,digest,planCpuCosts,planMemCosts,pendingTimeMs,candidateMVs,hitMvs");
+        if(!StringUtils.isBlank(this.streamLoadFilter)) {
+            conn.addRequestProperty("where", streamLoadFilter);
+        }
 
         conn.setDoOutput(true);
         conn.setDoInput(true);
@@ -89,11 +109,13 @@ public class StarrocksStreamLoader {
         sb.append("-H \"").append("Authorization\":").append("\"Basic " + authEncoding).append("\" \\\n  ");
         sb.append("-H \"").append("Expect\":").append("\"100-continue\" \\\n  ");
         sb.append("-H \"").append("Content-Type\":").append("\"text/plain; charset=UTF-8\" \\\n  ");
-        sb.append("-H \"").append("max_filter_ratio\":").append("\"1.0\" \\\n  ");
-        sb.append("-H \"").append("column_separator\":").append("\"\\x01\" \\\n  ");
-        sb.append("-H \"").append("row_delimiter\":").append("\"\\x02\" \\\n  ");
+        sb.append("-H \"").append("format\":").append("\"json \\\n  ");
+        sb.append("-H \"").append("strip_outer_array\":").append("\"true \\\n  ");
+        if(!StringUtils.isBlank(this.streamLoadFilter)) {
+            sb.append("-H \"").append("where\":").append(streamLoadFilter).append(" \\\n  ");
+        }
         sb.append("-H \"").append("columns\":").append("\"queryId, timestamp, queryType, clientIp, user, authorizedUser, resourceGroup, catalog, db, state, errorCode," +
-                "queryTime, scanBytes, scanRows, returnRows, cpuCostNs, memCostBytes, stmtId, isQuery, feIp, stmt, digest, planCpuCosts, planMemCosts\" \\\n  ");
+                "queryTime, scanBytes, scanRows, returnRows, cpuCostNs, memCostBytes, stmtId, isQuery, feIp, stmt, digest, planCpuCosts, planMemCosts, pendingTimeMs, candidateMVs, hitMvs\" \\\n  ");
         sb.append("\"").append(conn.getURL()).append("\"");
         return sb.toString();
     }
@@ -118,33 +140,38 @@ public class StarrocksStreamLoader {
         return response.toString();
     }
 
-    public LoadResponse loadBatch(StringBuilder sb, String separator, String delimiter) {
+    public LoadResponse loadBatch(StringBuilder sb) {
         Calendar calendar = Calendar.getInstance();
+        // label length limit is less than 128 , audit_%s%02d%02d_%02d%02d%02d_ length is 22
+        String labelId = this.feIdentity.length() > 106 ? UUID.randomUUID().toString().replaceAll("-","") : this.feIdentity;
         String label = String.format("audit_%s%02d%02d_%02d%02d%02d_%s",
                 calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1, calendar.get(Calendar.DAY_OF_MONTH),
                 calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE), calendar.get(Calendar.SECOND),
-                feIdentity);
+                labelId);
 
         HttpURLConnection feConn = null;
         HttpURLConnection beConn = null;
         try {
             // build request and send to fe
-            feConn = getConnection(loadUrlStr, label, separator, delimiter);
+            feConn = getConnection(loadUrlStr, label);
+            // print curl load command in fe.log
+            // LOG.info(toCurl(feConn));
             int status = feConn.getResponseCode();
-            // fe send back http response code TEMPORARY_REDIRECT 307 and new be location
-            if (status != 307) {
-                throw new Exception("status is not TEMPORARY_REDIRECT 307, status: " + status
+            // fe send back http response code TEMPORARY_REDIRECT 307 and new be location, or response code HTTP_OK 200 from nginx
+            if (status != TEMPORARY_REDIRECT_CODE && status != HttpURLConnection.HTTP_OK) {
+                throw new Exception("status is not TEMPORARY_REDIRECT 307 or HTTP_OK 200, status: " + status
                         + ", response: " + getContent(feConn) + ", request is: " + toCurl(feConn));
             }
             String location = feConn.getHeaderField("Location");
-            if (location == null) {
+            if (status == TEMPORARY_REDIRECT_CODE && location == null) {
                 throw new Exception("redirect location is null");
             }
-            // build request and send to new be location
-            beConn = getConnection(location, label, separator, delimiter);
+            // build request and send to new be location, or use old conn if status is 200
+            beConn = status == TEMPORARY_REDIRECT_CODE ? getConnection(location, label) : getConnection(loadUrlStr, label);
             // send data to be
             BufferedOutputStream bos = new BufferedOutputStream(beConn.getOutputStream());
-            bos.write(sb.toString().getBytes());
+            String content = "[" + sb.toString() + "]";
+            bos.write(content.getBytes());
             bos.close();
 
             // get respond
