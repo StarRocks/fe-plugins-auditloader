@@ -44,6 +44,10 @@ public class StarrocksStreamLoader {
     private String loadUrlStr;
     private String authEncoding;
     private String feIdentity;
+
+    private int connectTimeout;
+    private int readTimeout;
+
     private String streamLoadFilter;
 
     public StarrocksStreamLoader(AuditLoaderPlugin.AuditLoaderConf conf) {
@@ -65,6 +69,10 @@ public class StarrocksStreamLoader {
         this.authEncoding = Base64.getEncoder().encodeToString(String.format("%s:%s", user, passwd).getBytes(StandardCharsets.UTF_8));
         // currently, FE identity is FE's IP, so we replace the "." in IP to make it suitable for label
         this.feIdentity = conf.feIdentity.replaceAll("\\.", "_");
+
+        this.connectTimeout = conf.connectTimeout;
+        this.readTimeout = conf.readTimeout;
+      
         this.streamLoadFilter = conf.streamLoadFilter;
     }
 
@@ -88,6 +96,9 @@ public class StarrocksStreamLoader {
 
         conn.setDoOutput(true);
         conn.setDoInput(true);
+
+        conn.setConnectTimeout(connectTimeout);
+        conn.setReadTimeout(readTimeout);
 
         return conn;
     }
