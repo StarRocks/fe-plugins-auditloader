@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="starrocks-fe">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/lib/starrocks-fe.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

@@ -26,8 +26,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
@@ -78,6 +76,14 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
      * 是否包含新字段 hitMVsExists，如果旧版本没有该字段则值为空
      */
     private boolean hitMVsExists;
+    /**
+     * 是否包含新字段isForwardToLeader，如果旧版本没有该字段则值为空
+     */
+    private boolean isForwardToLeaderExists;
+    /**
+     * 是否包含新字段queryFeMemory，如果旧版本没有该字段则值为空
+     */
+    private boolean queryFeMemoryExists;
 
     @Override
     public void init(PluginInfo info, PluginContext ctx) throws PluginException {
@@ -97,6 +103,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
 
             candidateMvsExists = hasField(AuditEvent.class, "candidateMvs");
             hitMVsExists = hasField(AuditEvent.class, "hitMVs");
+            isForwardToLeaderExists = hasField(AuditEvent.class, "isForwardToLeader");
+            queryFeMemoryExists = hasField(AuditEvent.class,"queryFeMemory");
 
             isInit = true;
         }
@@ -170,6 +178,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         }
         String candidateMvsVal = candidateMvsExists ? event.candidateMvs : "";
         String hitMVsVal = hitMVsExists ? event.hitMVs : "";
+        Boolean isForwardToLeaderVal = isForwardToLeaderExists ? event.isForwardToLeader : null;
+        Long queryFeMemoryVal = queryFeMemoryExists ? event.queryFeMemory : null;
         String content = "{\"queryId\":\"" + getQueryId(queryType, event) + "\"," +
                 "\"timestamp\":\"" + longToTimeString(event.timestamp) + "\"," +
                 "\"queryType\":\"" + queryType + "\"," +
@@ -197,7 +207,9 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 "\"pendingTimeMs\":" + event.pendingTimeMs + "," +
                 "\"candidateMVs\":\"" + candidateMvsVal + "\"," +
                 "\"hitMvs\":\"" + hitMVsVal + "\"," +
-                "\"warehouse\":\"" + event.warehouse + "\"}";
+                "\"warehouse\":\"" + event.warehouse + "\"," +
+                "\"isForwardToLeader\":" + isForwardToLeaderVal + "," +
+                "\"queryFeMemory\":" + queryFeMemoryVal + "}";
         if (auditBuffer.length() > 0) {
             auditBuffer.append(",");
         }
