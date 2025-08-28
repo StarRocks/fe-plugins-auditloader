@@ -44,10 +44,6 @@ public class StarrocksStreamLoader {
     private String loadUrlStr;
     private String authEncoding;
     private String feIdentity;
-
-    private int connectTimeout;
-    private int readTimeout;
-
     private String streamLoadFilter;
 
     public StarrocksStreamLoader(AuditLoaderPlugin.AuditLoaderConf conf) {
@@ -69,10 +65,6 @@ public class StarrocksStreamLoader {
         this.authEncoding = Base64.getEncoder().encodeToString(String.format("%s:%s", user, passwd).getBytes(StandardCharsets.UTF_8));
         // currently, FE identity is FE's IP, so we replace the "." in IP to make it suitable for label
         this.feIdentity = conf.feIdentity.replaceAll("\\.", "_");
-
-        this.connectTimeout = conf.connectTimeout;
-        this.readTimeout = conf.readTimeout;
-      
         this.streamLoadFilter = conf.streamLoadFilter;
     }
 
@@ -84,11 +76,12 @@ public class StarrocksStreamLoader {
         conn.setRequestProperty("Authorization", "Basic " + authEncoding);
         conn.addRequestProperty("Expect", "100-continue");
         conn.addRequestProperty("Content-Type", "text/plain; charset=UTF-8");
-        conn.addRequestProperty("format", "json");
-        conn.addRequestProperty("strip_outer_array", "true");
 
         conn.addRequestProperty("label", label);
         conn.addRequestProperty("max_filter_ratio", "1.0");
+        conn.addRequestProperty("column_separator", String.valueOf(AuditLoaderPlugin.COLUMN_SEPARATOR));
+        conn.addRequestProperty("row_delimiter", String.valueOf(AuditLoaderPlugin.ROW_DELIMITER));
+
         conn.addRequestProperty("columns", "queryId,timestamp,queryType,clientIp,user,authorizedUser,resourceGroup,catalog,db,state,errorCode,queryTime,scanBytes,scanRows,returnRows,cpuCostNs,memCostBytes,stmtId,isQuery,feIp,stmt,digest,planCpuCosts,planMemCosts,pendingTimeMs,candidateMVs,hitMvs,warehouse");
         if(!StringUtils.isBlank(this.streamLoadFilter)) {
             conn.addRequestProperty("where", streamLoadFilter);
@@ -96,9 +89,6 @@ public class StarrocksStreamLoader {
 
         conn.setDoOutput(true);
         conn.setDoInput(true);
-
-        conn.setConnectTimeout(connectTimeout);
-        conn.setReadTimeout(readTimeout);
 
         return conn;
     }
@@ -109,8 +99,9 @@ public class StarrocksStreamLoader {
         sb.append("-H \"").append("Authorization\":").append("\"Basic " + authEncoding).append("\" \\\n  ");
         sb.append("-H \"").append("Expect\":").append("\"100-continue\" \\\n  ");
         sb.append("-H \"").append("Content-Type\":").append("\"text/plain; charset=UTF-8\" \\\n  ");
-        sb.append("-H \"").append("format\":").append("\"json \\\n  ");
-        sb.append("-H \"").append("strip_outer_array\":").append("\"true \\\n  ");
+        sb.append("-H \"").append("max_filter_ratio\":").append("\"1.0\" \\\n  ");
+        sb.append("-H \"").append("column_separator\":").append(AuditLoaderPlugin.COLUMN_SEPARATOR).append(" \\\n  ");
+        sb.append("-H \"").append("row_delimiter\":").append(AuditLoaderPlugin.ROW_DELIMITER).append(" \\\n  ");
         if(!StringUtils.isBlank(this.streamLoadFilter)) {
             sb.append("-H \"").append("where\":").append(streamLoadFilter).append(" \\\n  ");
         }
@@ -170,8 +161,7 @@ public class StarrocksStreamLoader {
             beConn = status == TEMPORARY_REDIRECT_CODE ? getConnection(location, label) : getConnection(loadUrlStr, label);
             // send data to be
             BufferedOutputStream bos = new BufferedOutputStream(beConn.getOutputStream());
-            String content = "[" + sb.toString() + "]";
-            bos.write(content.getBytes());
+            bos.write(sb.toString().getBytes());
             bos.close();
 
             // get respond
