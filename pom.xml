@@ -18,7 +18,7 @@
         <dependency>
             <groupId>com.starrocks</groupId>
             <artifactId>starrocks-fe</artifactId>
-            <version>3.3.11</version>
+            <version>3.3.19</version>
             <scope>system</scope>
             <systemPath>${basedir}/lib/starrocks-fe.jar</systemPath>
         </dependency>

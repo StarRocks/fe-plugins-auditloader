@@ -189,6 +189,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         auditBuffer.append(event.planCpuCosts).append(COLUMN_SEPARATOR);
         auditBuffer.append(event.planMemCosts).append(COLUMN_SEPARATOR);
         auditBuffer.append(event.pendingTimeMs).append(COLUMN_SEPARATOR);
+        auditBuffer.append(event.queryFeMemory).append(COLUMN_SEPARATOR);
         String candidateMvsVal = candidateMvsExists ? event.candidateMvs : "";
         auditBuffer.append(candidateMvsVal).append(COLUMN_SEPARATOR);
         String hitMVsVal = hitMVsExists ? event.hitMVs : "";
