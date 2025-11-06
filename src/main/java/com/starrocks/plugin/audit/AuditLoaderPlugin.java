@@ -18,6 +18,10 @@
 package com.starrocks.plugin.audit;
 
 import com.starrocks.plugin.*;
+import com.starrocks.plugin.audit.output.KafkaOutputHandler;
+import com.starrocks.plugin.audit.output.OutputHandler;
+import com.starrocks.plugin.audit.output.StreamLoadOutputHandler;
+import com.starrocks.plugin.audit.routing.OutputRouter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -49,10 +53,14 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
 
     private static final SimpleDateFormat DATETIME_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
-    private StringBuilder auditBuffer = new StringBuilder();
+    // CSV format constants for Stream Load
+    public static final char COLUMN_SEPARATOR = '\t';
+    public static final char ROW_DELIMITER = '\n';
+
     private long lastLoadTime = 0;
     private BlockingQueue<AuditEvent> auditEventQueue;
-    private StarrocksStreamLoader streamLoader;
+    private List<AuditEvent> eventBatch;
+    private OutputRouter outputRouter;
     private Thread loadThread;
 
     private AuditLoaderConf conf;
@@ -68,16 +76,6 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
      */
     private boolean hitMVsExists;
 
-
-    /**
-     * 列分隔符
-     */
-    public static final String COLUMN_SEPARATOR = "|*$&$*|";
-    /**
-     * 行分隔符
-     */
-    public static final String ROW_DELIMITER = "~*$&$*~";
-
     @Override
     public void init(PluginInfo info, PluginContext ctx) throws PluginException {
         super.init(info, ctx);
@@ -90,8 +88,12 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
 
             loadConfig(ctx, info.getProperties());
             this.auditEventQueue = new LinkedBlockingQueue<>(conf.maxQueueSize);
-            this.streamLoader = new StarrocksStreamLoader(conf);
-            this.loadThread = new Thread(new LoadWorker(this.streamLoader), "audit loader thread");
+            this.eventBatch = new ArrayList<>();
+
+            // Initialize output router
+            initializeOutputRouter();
+
+            this.loadThread = new Thread(new LoadWorker(), "audit loader thread");
             this.loadThread.setDaemon(true);
             this.loadThread.start();
 
@@ -100,6 +102,101 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
 
             isInit = true;
         }
+    }
+
+    /**
+     * Initialize output router based on configuration
+     */
+    private void initializeOutputRouter() throws PluginException {
+        String outputMode = conf.properties.getOrDefault("output_mode", "streamload");
+
+        OutputRouter.RoutingMode routingMode;
+        switch (outputMode.toLowerCase()) {
+            case "kafka":
+                routingMode = OutputRouter.RoutingMode.SINGLE;
+                break;
+            case "dual":
+                routingMode = OutputRouter.RoutingMode.DUAL;
+                break;
+            case "fallback":
+                routingMode = OutputRouter.RoutingMode.FALLBACK;
+                break;
+            case "streamload":
+            default:
+                routingMode = OutputRouter.RoutingMode.SINGLE;
+                break;
+        }
+
+        this.outputRouter = new OutputRouter(routingMode);
+
+        // Initialize handlers based on mode
+        try {
+            if ("kafka".equalsIgnoreCase(outputMode)) {
+                // Kafka only
+                boolean kafkaEnabled = Boolean.parseBoolean(
+                    conf.properties.getOrDefault("kafka.enabled", "false"));
+                if (kafkaEnabled) {
+                    KafkaOutputHandler kafkaHandler = new KafkaOutputHandler();
+                    kafkaHandler.init(conf.properties);
+                    outputRouter.addHandler(kafkaHandler);
+                    LOG.info("Initialized Kafka output handler");
+                } else {
+                    throw new PluginException("Kafka output mode selected but kafka.enabled=false");
+                }
+            } else if ("dual".equalsIgnoreCase(outputMode)) {
+                // Both Stream Load and Kafka
+                boolean kafkaEnabled = Boolean.parseBoolean(
+                    conf.properties.getOrDefault("kafka.enabled", "false"));
+
+                // Add Stream Load handler
+                StreamLoadOutputHandler streamHandler = new StreamLoadOutputHandler();
+                streamHandler.init(conf.properties);
+                outputRouter.addHandler(streamHandler);
+                LOG.info("Initialized Stream Load output handler");
+
+                // Add Kafka handler if enabled
+                if (kafkaEnabled) {
+                    KafkaOutputHandler kafkaHandler = new KafkaOutputHandler();
+                    kafkaHandler.init(conf.properties);
+                    outputRouter.addHandler(kafkaHandler);
+                    LOG.info("Initialized Kafka output handler");
+                }
+            } else if ("fallback".equals(outputMode.toLowerCase())) {
+                // Kafka primary, Stream Load fallback
+                String primaryOutput = conf.properties.getOrDefault("primary_output", "kafka");
+                String secondaryOutput = conf.properties.getOrDefault("secondary_output", "streamload");
+
+                // Add primary handler
+                if ("kafka".equals(primaryOutput)) {
+                    boolean kafkaEnabled = Boolean.parseBoolean(
+                        conf.properties.getOrDefault("kafka.enabled", "false"));
+                    if (kafkaEnabled) {
+                        KafkaOutputHandler kafkaHandler = new KafkaOutputHandler();
+                        kafkaHandler.init(conf.properties);
+                        outputRouter.addHandler(kafkaHandler);
+                        LOG.info("Initialized Kafka as primary output handler");
+                    }
+                }
+
+                // Add secondary handler
+                if ("streamload".equals(secondaryOutput)) {
+                    StreamLoadOutputHandler streamHandler = new StreamLoadOutputHandler();
+                    streamHandler.init(conf.properties);
+                    outputRouter.addHandler(streamHandler);
+                    LOG.info("Initialized Stream Load as fallback output handler");
+                }
+            } else {
+                // Default: Stream Load only
+                StreamLoadOutputHandler streamHandler = new StreamLoadOutputHandler();
+                streamHandler.init(conf.properties);
+                outputRouter.addHandler(streamHandler);
+                LOG.info("Initialized Stream Load output handler (default)");
+            }
+        } catch (Exception e) {
+            throw new PluginException("Failed to initialize output handlers: " + e.getMessage(), e);
+        }
+
+        LOG.info("Output router initialized with mode: {}", outputMode);
     }
 
     private void loadConfig(PluginContext ctx, Map<String, String> pluginInfoProperties) throws PluginException {
@@ -143,6 +240,9 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 LOG.debug("encounter exception when closing the audit loader", e);
             }
         }
+        if (outputRouter != null) {
+            outputRouter.close();
+        }
         LOG.info("AuditLoader plugin is closed");
     }
 
@@ -163,37 +263,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
     }
 
     private void assembleAudit(AuditEvent event) {
-        String queryType = getQueryType(event);
-        auditBuffer.append(getQueryId(queryType,event)).append(COLUMN_SEPARATOR);
-        auditBuffer.append(longToTimeString(event.timestamp)).append(COLUMN_SEPARATOR);
-        auditBuffer.append(queryType).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.clientIp).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.user).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.authorizedUser).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.resourceGroup).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.catalog).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.db).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.state).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.errorCode).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.queryTime).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.scanBytes).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.scanRows).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.returnRows).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.cpuCostNs).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.memCostBytes).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.stmtId).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.isQuery ? 1 : 0).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.feIp).append(COLUMN_SEPARATOR);
-        auditBuffer.append(truncateByBytes(event.stmt)).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.digest).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.planCpuCosts).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.planMemCosts).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.pendingTimeMs).append(COLUMN_SEPARATOR);
-        String candidateMvsVal = candidateMvsExists ? event.candidateMvs : "";
-        auditBuffer.append(candidateMvsVal).append(COLUMN_SEPARATOR);
-        String hitMVsVal = hitMVsExists ? event.hitMVs : "";
-        auditBuffer.append(hitMVsVal).append(COLUMN_SEPARATOR);
-        auditBuffer.append(event.warehouse).append(ROW_DELIMITER);
+        // Add event to batch for output router processing
+        eventBatch.add(event);
     }
 
     private String getQueryId(String prefix, AuditEvent event) {
@@ -231,24 +302,24 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         return new String(charBuffer.array(), 0, charBuffer.position());
     }
 
-    private void loadIfNecessary(StarrocksStreamLoader loader) {
-        if (auditBuffer.length() < conf.maxBatchSize && System.currentTimeMillis() - lastLoadTime < conf.maxBatchIntervalSec * 1000) {
+    private void loadIfNecessary() {
+        if (eventBatch.size() < conf.maxBatchSize && System.currentTimeMillis() - lastLoadTime < conf.maxBatchIntervalSec * 1000) {
             return;
         }
-        if (auditBuffer.length() == 0) {
+        if (eventBatch.isEmpty()) {
             return;
         }
 
         lastLoadTime = System.currentTimeMillis();
         // begin to load
         try {
-            StarrocksStreamLoader.LoadResponse response = loader.loadBatch(auditBuffer);
-            LOG.debug("audit loader response: {}", response);
+            outputRouter.route(new ArrayList<>(eventBatch));
+            LOG.debug("audit loader batch sent successfully");
         } catch (Exception e) {
-            LOG.error("encounter exception when putting current audit batch, discard current batch", e);
+            LOG.error("encounter exception when routing current audit batch, discard current batch", e);
         } finally {
-            // make a new string builder to receive following events.
-            this.auditBuffer = new StringBuilder();
+            // clear the batch for next round
+            eventBatch.clear();
         }
     }
 
@@ -300,8 +371,10 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         public String streamLoadFilter = "";
         public String secretKey = "";
         public long uninstallTimeout = 5;
+        public Map<String, String> properties;
 
         public void init(Map<String, String> properties) throws PluginException {
+            this.properties = properties;
             try {
                 if (properties.containsKey(PROP_MAX_BATCH_SIZE)) {
                     maxBatchSize = Long.parseLong(properties.get(PROP_MAX_BATCH_SIZE));
@@ -352,10 +425,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
     }
 
     private class LoadWorker implements Runnable {
-        private StarrocksStreamLoader loader;
-
-        public LoadWorker(StarrocksStreamLoader loader) {
-            this.loader = loader;
+        public LoadWorker() {
         }
 
         public void run() {
@@ -365,7 +435,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                     if (event != null) {
                         assembleAudit(event);
                     }
-                    loadIfNecessary(loader);
+                    loadIfNecessary();
                 } catch (InterruptedException ie) {
                     LOG.debug("encounter exception when loading current audit batch", ie);
                 } catch (Exception e) {

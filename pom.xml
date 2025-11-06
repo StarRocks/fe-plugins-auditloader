@@ -50,6 +50,12 @@
             <artifactId>commons-codec</artifactId>
             <version>1.17.1</version>
         </dependency>
+        <!-- Kafka Client for audit log streaming -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>3.6.0</version>
+        </dependency>
     </dependencies>
 
     <distributionManagement>
