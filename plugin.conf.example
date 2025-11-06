@@ -1,0 +1,204 @@
+### ============================================
+### StarRocks Audit Loader Plugin Configuration
+### with Kafka Integration Support
+### ============================================
+
+### --------------------------------------------
+### Basic Stream Load Settings (Legacy)
+### --------------------------------------------
+
+# The max size of a batch, default is 50MB
+max_batch_size=52428800
+
+# The max interval of batch loaded, default is 60 seconds
+max_batch_interval_sec=60
+
+# StarRocks FE host for loading the audit, default is 127.0.0.1:8030
+# This should be the host port for stream load
+frontend_host_port=127.0.0.1:8030
+
+# If the response time of a query exceed this threshold, it will be recorded in audit table as slow_query
+qe_slow_log_ms=5000
+
+# The capacity of audit queue, default is 1000
+max_queue_size=1000
+
+# Database of the audit table
+database=starrocks_audit_db__
+
+# Audit table name, to save the audit data
+table=starrocks_audit_tbl__
+
+# StarRocks user. This user must have import permissions for the audit table
+user=root
+
+# StarRocks user's password
+password=
+
+# StarRocks password encryption key, with a length not exceeding 16 bytes
+secret_key=
+
+# The max stmt length to be loaded in audit table, default is 1048576
+max_stmt_length=1048576
+
+# Whether to generate sql digest for all queries
+enable_compute_all_query_digest=false
+
+# Filter conditions when importing audit information
+filter=
+
+# Connection timeout (milliseconds)
+connect_timeout=1000
+
+# Read timeout (milliseconds)
+read_timeout=1000
+
+
+### ============================================
+### NEW: Output Routing Configuration
+### ============================================
+
+# Output mode: streamload, kafka, dual, fallback
+# - streamload: Only use StarRocks Stream Load (default, backward compatible)
+# - kafka: Only use Kafka output
+# - dual: Use both Stream Load and Kafka simultaneously (parallel)
+# - fallback: Use primary output, fallback to secondary on failure
+output_mode=streamload
+
+# Primary output handler (for fallback mode)
+# Options: kafka, streamload
+primary_output=kafka
+
+# Secondary output handler (for fallback mode)
+# Options: kafka, streamload
+secondary_output=streamload
+
+
+### ============================================
+### Kafka Producer Configuration
+### ============================================
+
+# Enable Kafka output
+kafka.enabled=false
+
+# Kafka broker addresses (comma-separated)
+kafka.bootstrap.servers=localhost:9092
+
+# Kafka topic name
+kafka.topic=starrocks_audit_logs
+
+# Async mode (true: asynchronous, false: synchronous)
+# Async mode provides better performance but may lose messages on crash
+# Sync mode ensures delivery but has higher latency
+kafka.async_mode=true
+
+### --------------------------------------------
+### Kafka Performance Settings
+### --------------------------------------------
+
+# Batch size in bytes (default: 16384 = 16KB)
+# Larger batches improve throughput but increase latency
+kafka.batch.size=16384
+
+# Linger time in milliseconds (default: 10ms)
+# How long to wait for additional messages before sending a batch
+kafka.linger.ms=10
+
+# Compression type: none, gzip, snappy, lz4, zstd
+# snappy: Good balance of compression and CPU usage (recommended)
+# lz4: Fast compression with moderate ratio
+# gzip: Best compression but high CPU usage
+kafka.compression.type=snappy
+
+# Producer buffer memory in bytes (default: 33554432 = 32MB)
+kafka.buffer.memory=33554432
+
+### --------------------------------------------
+### Kafka Reliability Settings
+### --------------------------------------------
+
+# Acknowledgment level:
+# 0: No acknowledgment (fastest, may lose data)
+# 1: Leader acknowledgment only (balanced, recommended)
+# all/-1: All in-sync replicas acknowledgment (safest, slowest)
+kafka.acks=1
+
+# Number of retries on failure
+kafka.retries=3
+
+# Maximum number of unacknowledged requests per connection
+kafka.max.in.flight.requests.per.connection=5
+
+### --------------------------------------------
+### Kafka Timeout Settings
+### --------------------------------------------
+
+# Request timeout in milliseconds
+kafka.request.timeout.ms=30000
+
+# Delivery timeout in milliseconds
+kafka.delivery.timeout.ms=120000
+
+### --------------------------------------------
+### Kafka Security Settings (Optional)
+### --------------------------------------------
+
+# SASL mechanism: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+# kafka.sasl.mechanism=PLAIN
+
+# SASL JAAS configuration
+# Example for PLAIN:
+# kafka.sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="user" password="password";
+# Example for SCRAM-SHA-256:
+# kafka.sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="user" password="password";
+
+# Security protocol: PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL
+# kafka.security.protocol=SASL_SSL
+
+# SSL truststore location
+# kafka.ssl.truststore.location=/path/to/truststore.jks
+
+# SSL truststore password
+# kafka.ssl.truststore.password=password
+
+
+### ============================================
+### Configuration Examples
+### ============================================
+
+### Example 1: Kafka Only (High Performance)
+# output_mode=kafka
+# kafka.enabled=true
+# kafka.bootstrap.servers=kafka-broker1:9092,kafka-broker2:9092
+# kafka.topic=starrocks_audit_logs
+# kafka.async_mode=true
+# kafka.acks=1
+# kafka.compression.type=snappy
+
+### Example 2: Dual Mode (Both Outputs)
+# output_mode=dual
+# kafka.enabled=true
+# kafka.bootstrap.servers=kafka-broker:9092
+# kafka.topic=starrocks_audit_logs
+# frontend_host_port=127.0.0.1:8030
+# database=starrocks_audit_db__
+# table=starrocks_audit_tbl__
+
+### Example 3: Fallback Mode (Fault Tolerance)
+# output_mode=fallback
+# primary_output=kafka
+# secondary_output=streamload
+# kafka.enabled=true
+# kafka.bootstrap.servers=kafka-broker:9092
+# kafka.topic=starrocks_audit_logs
+# frontend_host_port=127.0.0.1:8030
+# database=starrocks_audit_db__
+# table=starrocks_audit_tbl__
+
+### Example 4: Stream Load Only (Default/Legacy)
+# output_mode=streamload
+# frontend_host_port=127.0.0.1:8030
+# database=starrocks_audit_db__
+# table=starrocks_audit_tbl__
+# user=root
+# password=
