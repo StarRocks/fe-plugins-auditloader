@@ -52,6 +52,7 @@ CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
   `pendingTimeMs` BIGINT COMMENT "查询在队列中等待的时间（毫秒）",
   `candidateMVs` varchar(65533) NULL COMMENT "候选MV列表",
   `hitMvs` varchar(65533) NULL COMMENT "命中MV列表",
+  `QueriedRelations` ARRAY<VARCHAR(65533)> NULL COMMENT "查询直接访问的表、视图",
   `warehouse` VARCHAR(128) NULL COMMENT "仓库名称" 
 ) ENGINE = OLAP
 DUPLICATE KEY (`queryId`, `timestamp`, `queryType`)
@@ -277,9 +278,10 @@ StarRocks审计表中支持的 `queryType` 类型包括：query、slow_query 和
 
 2）在审计日志表中预留增加了 candidateMVs 和 hitMvs 两个重要监测字段
 
-3）新增在 plugin.conf 中通过 filter 参数进行审计信息的入库条件筛选功能
+3）适配 StarRocks 审计日志 QueriedRelations 字段
 
-4）调整插件攒批逻辑为 Json，规避 StarRocks 3.2.12+ 等版本 FE netty 依赖升级导致的原 CSV 攒批逻辑在写入时报错 `Validation failed for header 'column_separator'` 的问题
+4）新增在 plugin.conf 中通过 filter 参数进行审计信息的入库条件筛选功能
 
-5）其他细节优化
+5）调整插件攒批逻辑为 Json，规避 StarRocks 3.2.12+ 等版本 FE netty 依赖升级导致的原 CSV 攒批逻辑在写入时报错 `Validation failed for header 'column_separator'` 的问题
 
+6）其他细节优化

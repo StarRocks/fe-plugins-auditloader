@@ -78,6 +78,10 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
      * 是否包含新字段 hitMVsExists，如果旧版本没有该字段则值为空
      */
     private boolean hitMVsExists;
+    /**
+     * 是否包含新字段 queriedRelations，如果旧版本没有该字段则值为空
+     */
+    private boolean queriedRelationsExists;
 
     @Override
     public void init(PluginInfo info, PluginContext ctx) throws PluginException {
@@ -97,6 +101,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
 
             candidateMvsExists = hasField(AuditEvent.class, "candidateMvs");
             hitMVsExists = hasField(AuditEvent.class, "hitMVs");
+            queriedRelationsExists = hasField(AuditEvent.class, "queriedRelations");
 
             isInit = true;
         }
@@ -170,6 +175,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         }
         String candidateMvsVal = candidateMvsExists ? event.candidateMvs : "";
         String hitMVsVal = hitMVsExists ? event.hitMVs : "";
+        String queriedRelationsVal = queriedRelationsExists ? getQueriedRelationsJson(event) : "null";
         String content = "{\"queryId\":\"" + getQueryId(queryType, event) + "\"," +
                 "\"timestamp\":\"" + longToTimeString(event.timestamp) + "\"," +
                 "\"queryType\":\"" + queryType + "\"," +
@@ -197,6 +203,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 "\"pendingTimeMs\":" + event.pendingTimeMs + "," +
                 "\"candidateMVs\":\"" + candidateMvsVal + "\"," +
                 "\"hitMvs\":\"" + hitMVsVal + "\"," +
+                "\"QueriedRelations\":" + queriedRelationsVal + "," +
                 "\"warehouse\":\"" + event.warehouse + "\"}";
         if (auditBuffer.length() > 0) {
             auditBuffer.append(",");
@@ -275,6 +282,22 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         } finally {
             // make a new string builder to receive following events.
             this.auditBuffer = new StringBuilder();
+        }
+    }
+
+    private String getQueriedRelationsJson(AuditEvent event) {
+        try {
+            Field queriedRelationsField = AuditEvent.class.getDeclaredField("queriedRelations");
+            List<String> queriedRelations = (List<String>) queriedRelationsField.get(event);
+            if (queriedRelations == null || queriedRelations.isEmpty()) {
+                return "null";
+            }
+            return "[" + queriedRelations.stream()
+                    .map(relation -> "\"" + relation + "\"")
+                    .collect(Collectors.joining(",")) + "]";
+        } catch (Exception e) {
+            LOG.debug("encounter exception when getting queriedRelations from audit event", e);
+            return "null";
         }
     }
 
