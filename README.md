@@ -1,104 +1,101 @@
-# fe-plugins-auditloader
-本文档介绍如何通过插件 AuditLoader 在 StarRocks 内部管理审计信息。
+# `fe-plugins-auditloader`
 
-### 插件说明：
+This document describes how to manage audit information within StarRocks using the AuditLoader plugin.
 
-在 StarRocks 中，所有的审计信息仅存储在日志文件 **fe/log/fe.audit.log** 中，无法直接通过 StarRocks 进行访问。AuditLoader 插件可实现审计信息的入库，让您在 StarRocks 内方便的通过 SQL 进行集群审计信息的查看和管理。安装 AuditLoader 插件后，StarRocks 在执行 SQL 后会自动调用 AuditLoader 插件收集 SQL 的审计信息，然后将审计信息在内存中攒批，最后基于 Stream Load 的方式导入至 StarRocks 表中。
+### Plugin description:
 
-**注意**：StarRocks 各个大版本的审计日志字段个数存在差异，为保证版本通用性，新版本的审计插件选取了各大版本中通用的日志字段进行入库。若业务中需要更完整的字段，可替换工程中的 `fe-plugins-auditloader\lib\starrocks-fe.jar` ，同时修改代码中与字段相关的内容后重新编译打包。
+In StarRocks, all audit information is only stored in the log file **fe/log/fe.audit.log** and cannot be accessed directly through StarRocks. The AuditLoader plugin enables audit information to be loaded into the database, allowing you to conveniently view and manage cluster audit information via SQL within StarRocks. After installing the AuditLoader plugin, StarRocks will automatically invoke the AuditLoader plugin after executing SQL to collect audit information, batch it in memory, and then load it into a StarRocks table via Stream Load.
 
+**Note**: The number of audit log fields differs across major versions of StarRocks. To ensure version compatibility, the new audit plugin selects common log fields across major versions for database ingestion. If more complete fields are needed for your business, you can replace `fe-plugins-auditloader\lib\starrocks-fe.jar` in the project, modify the field-related content in the code, and then recompile and repackage.
 
+### Usage instructions:
 
-### 使用说明：
+##### 1. Create an internal table
 
-##### 1、创建内部表
+First, create a dynamic partition table in StarRocks to store the data from the audit logs. For standardized usage, it is recommended to create a dedicated database for it.
 
-首先在 StarRocks 中创建一个动态分区表，来保存审计日志中的数据。为了规范使用，建议为其单独创建一个数据库。
-
-例如，创建存放审计日志的数据库 `starrocks_audit_db__`：
+For example, create a database `starrocks_audit_db__` to store audit logs:
 
 ```SQL
 create database starrocks_audit_db__;
 ```
 
-在 `starrocks_audit_db__` 库创建 `starrocks_audit_tbl__` 表，表的字段顺序以及属性部分可以视实际业务进行修改：
+Create the `starrocks_audit_tbl__` table in the `starrocks_audit_db__` database. The field order and attribute section of the table can be modified according to actual business needs:
 
 ```SQL
 CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
-  `queryId` VARCHAR(64) COMMENT "查询的唯一ID",
-  `timestamp` DATETIME NOT NULL COMMENT "查询开始时间",
-  `queryType` VARCHAR(12) COMMENT "查询类型（query, slow_query, connection）",
-  `clientIp` VARCHAR(32) COMMENT "客户端IP",
-  `user` VARCHAR(64) COMMENT "查询用户名",
-  `authorizedUser` VARCHAR(64) COMMENT "用户唯一标识，既user_identity",
-  `resourceGroup` VARCHAR(64) COMMENT "资源组名",
-  `catalog` VARCHAR(32) COMMENT "数据目录名",
-  `db` VARCHAR(96) COMMENT "查询所在数据库",
-  `state` VARCHAR(8) COMMENT "查询状态（EOF，ERR，OK）",
-  `errorCode` VARCHAR(512) COMMENT "错误码",
-  `queryTime` BIGINT COMMENT "查询执行时间（毫秒）",
-  `scanBytes` BIGINT COMMENT "查询扫描的字节数",
-  `scanRows` BIGINT COMMENT "查询扫描的记录行数",
-  `returnRows` BIGINT COMMENT "查询返回的结果行数",
-  `cpuCostNs` BIGINT COMMENT "查询CPU耗时（纳秒）",
-  `memCostBytes` BIGINT COMMENT "查询消耗内存（字节）",
-  `stmtId` INT COMMENT "SQL语句增量ID",
-  `isQuery` TINYINT COMMENT "SQL是否为查询（1或0）",
-  `feIp` VARCHAR(128) COMMENT "执行该语句的FE IP",
-  `stmt` VARCHAR(1048576) COMMENT "SQL原始语句",
-  `digest` VARCHAR(32) COMMENT "慢SQL指纹",
-  `planCpuCosts` DOUBLE COMMENT "查询规划阶段CPU占用（纳秒）",
-  `planMemCosts` DOUBLE COMMENT "查询规划阶段内存占用（字节）",
-  `pendingTimeMs` BIGINT COMMENT "查询在队列中等待的时间（毫秒）",
-  `candidateMVs` varchar(65533) NULL COMMENT "候选MV列表",
-  `hitMvs` varchar(65533) NULL COMMENT "命中MV列表",
-  `QueriedRelations` ARRAY<VARCHAR(65533)> NULL COMMENT "查询直接访问的表、视图",
-  `warehouse` VARCHAR(128) NULL COMMENT "仓库名称" 
+  `queryId` VARCHAR(64) COMMENT "Unique ID of the query",
+  `timestamp` DATETIME NOT NULL COMMENT "Query start time",
+  `queryType` VARCHAR(12) COMMENT "Query type (query, slow_query, connection)",
+  `clientIp` VARCHAR(32) COMMENT "Client IP",
+  `user` VARCHAR(64) COMMENT "Query username",
+  `authorizedUser` VARCHAR(64) COMMENT "Unique user identifier, i.e., user_identity",
+  `resourceGroup` VARCHAR(64) COMMENT "Resource group name",
+  `catalog` VARCHAR(32) COMMENT "Data catalog name",
+  `db` VARCHAR(96) COMMENT "Database where the query is located",
+  `state` VARCHAR(8) COMMENT "Query Status (EOF, ERR, OK)",
+  `errorCode` VARCHAR(512) COMMENT "Error Code",
+  `queryTime` BIGINT COMMENT "Query Execution Time (milliseconds)",
+  `scanBytes` BIGINT COMMENT "Number of bytes scanned by the query",
+  `scanRows` BIGINT COMMENT "Number of rows scanned by the query",
+  `returnRows` BIGINT COMMENT "Number of rows returned by the query",
+  `cpuCostNs` BIGINT COMMENT "Query CPU Time (nanoseconds)",
+  `memCostBytes` BIGINT COMMENT "Query Memory Consumption (bytes)",
+  `stmtId` INT COMMENT "SQL Statement Increment ID",
+  `isQuery` TINYINT COMMENT "Whether the SQL is a query (1 or 0)",
+  `feIp` VARCHAR(128) COMMENT "FE IP that executed the statement",
+  `stmt` VARCHAR(1048576) COMMENT "Original SQL Statement",
+  `digest` VARCHAR(32) COMMENT "Slow SQL Fingerprint",
+  `planCpuCosts` DOUBLE COMMENT "CPU Usage During Query Planning Phase (Nanoseconds)",
+  `planMemCosts` DOUBLE COMMENT "Memory Usage During Query Planning Phase (Bytes)",
+  `pendingTimeMs` BIGINT COMMENT "Time the Query Has Been Waiting in the Queue (Milliseconds)",
+  `candidateMVs` varchar(65533) NULL COMMENT "List of candidate MVs",
+  `hitMvs` varchar(65533) NULL COMMENT "List of hit MVs",
+  `QueriedRelations` ARRAY<VARCHAR(65533)> NULL COMMENT "Tables and views directly accessed by the query",
+  `warehouse` VARCHAR(128) NULL COMMENT "Warehouse name"
 ) ENGINE = OLAP
 DUPLICATE KEY (`queryId`, `timestamp`, `queryType`)
-COMMENT "审计日志表"
+COMMENT "Audit log table"
 PARTITION BY RANGE (`timestamp`) ()
-DISTRIBUTED BY HASH (`queryId`) BUCKETS 3 
+DISTRIBUTED BY HASH (`queryId`) BUCKETS 3
 PROPERTIES (
   "dynamic_partition.time_unit" = "DAY",
-  "dynamic_partition.start" = "-30",  --表示只保留最近30天的审计信息，可视需求调整
+  "dynamic_partition.start" = "-30", --Indicates that only the audit information for the most recent 30 days is retained; this can be adjusted as needed.
   "dynamic_partition.end" = "3",
   "dynamic_partition.prefix" = "p",
   "dynamic_partition.buckets" = "3",
   "dynamic_partition.enable" = "true",
-  "replication_num" = "3"  --若集群中BE个数不大于3，可调整副本数为1，生产集群不推荐调整
+  "replication_num" = "3" --If the number of BEs in the cluster is no more than 3, the replica count can be adjusted to 1; adjusting this is not recommended for production clusters.
 );
 ```
 
-**注意**：为便于对审计信息进行TTL（Time to Live）生命周期管理，通常推荐将表 `starrocks_audit_tbl__` 创建为动态分区表，上文的建表语句中没有显示的创建分区，所以建表后需要等待后台动态分区调度线程调度后才会生成当天及后三天的分区。动态分区调度进程默认 10 分钟调度一次（fe.conf  dynamic_partition_check_interval_seconds），您可以先观察分区是否已经被创建，再进行后续操作，分区查看命令为：
+> Note:
+>
+> To facilitate TTL (Time to Live) lifecycle management of audit information, it is generally recommended to create the table `starrocks_audit_tbl__` as a dynamic partition table. The table creation statement above does not explicitly create partitions, so after the table is created, you need to wait for the background dynamic partition scheduling thread to run before partitions for the current day and the next three days are generated. The dynamic partition scheduling process runs every 10 minutes by default (fe.conf dynamic\_partition\_check\_interval\_seconds). You can first check whether the partitions have been created before proceeding with subsequent operations. The command to view partitions is:
+>
+> ```SQL
+> show partitions from starrocks_audit_db__.starrocks_audit_tbl__;
+> ```
 
-```SQL
-show partitions from starrocks_audit_db__.starrocks_audit_tbl__;
-```
+##### 2. Modify the configuration file
 
-
-
-##### 2、修改配置文件
-
-审计插件包名称为 auditloader.zip，解压插件：
+The audit plugin package is named `auditloader.zip`. Unzip the plugin:
 
 ```SHELL
 [root@node01 ~]# unzip auditloader.zip
 Archive:  auditloader.zip
-  inflating: auditloader.jar        
-  inflating: plugin.conf            
+  inflating: auditloader.jar
+  inflating: plugin.conf
   inflating: plugin.properties
 ```
 
-该命令会把 zip 里面的文件直接解压到当前目录，解压后可以得到插件中的三个文件：
+This command extracts the files inside the zip directly to the current directory. After extraction, you will get three files from the plugin:
 
-`auditloader.jar`：审计插件代码编译后得到的程序 jar 包。
+- `auditloader.jar`: The compiled program jar package of the audit plugin code.
+- `plugin.conf`: The plugin configuration file, used to provide configuration parameters for the underlying Stream Load writes performed by the plugin. It needs to be modified according to the cluster information. It is generally recommended to only modify the `user` and `password` information.
+- `plugin.properties`: The plugin properties file, used to provide descriptive information about the audit plugin within the StarRocks cluster. No modification is needed.
 
-`plugin.conf`：插件配置文件，用于提供插件底层进行 Stream Load 写入时的配置参数，需根据集群信息修改。通常只建议修改其中的 `user` 和 `password` 信息。
-
-`plugin.properties`：插件属性文件，用于提供审计插件在 StarRocks 集群内的描述信息，无需修改。
-
-根据实际的集群信息，修改配置文件 `plugin.conf`：
+Modify the configuration file `plugin.conf` according to the actual cluster information:
 
 ```XML
 ### plugin configuration
@@ -144,56 +141,51 @@ enable_compute_all_query_digest=false
 filter=
 ```
 
-**说明**：
-1. 推荐使用参数 `frontend_host_port` 的默认配置，即 `127.0.0.1:8030` 。StarRocks 中各个 FE 是独立管理各自的审计信息的，在安装审计插件后，各个 FE 分别会启动各自的后台线程进行审计信息的获取攒批和 Stream Load 写入。 `frontend_host_port` 配置项用于为插件后台 Stream Load 任务提供 http 协议的 IP 和端口，该参数不支持配置为多个值。其中，参数 IP 部分可以使用集群内任意某个 FE 的 IP，但并不推荐这样配置，因为若对应的 FE 出现异常，其他 FE 后台的审计信息写入任务也会因无法通信导致写入失败。推荐配置为默认的 `127.0.0.1:8030`，让各个 FE 均使用自身的 http 端口进行通信，以此规避其他 FE 异常时对通信的影响（当然，所有的写入任务最终都会被自动转发到 FE Leader 节点执行）。
-2. `secret_key` 参数用于配置"加密密码的 key 字符串"，在审计插件中其长度不得超过 16 个字节。如果该参数留空，表示不对 `plugin.conf` 中的密码进行加解密，在 password 处直接配置明文密码即可。如果该参数不为空，表示需要对密码进行加解密，password 处需配置为加密后的字符串，加密后的密码可在 StarRocks 中通过 `AES_ENCRYPT` 函数生成：`SELECT TO_BASE64(AES_ENCRYPT('password','secret_key'));`。
-3. `enable_compute_all_query_digest` 参数表示是否对所有查询都生成 Hash SQL 指纹（StarRocks 默认只为慢查询开启 SQL 指纹，注意插件中的指纹计算方法与 FE 内部的方法不一致，FE 会对 SQL 语句[规范化处理](https://docs.mirrorship.cn/zh/docs/administration/Query_planning/#%E6%9F%A5%E7%9C%8B-sql-%E6%8C%87%E7%BA%B9)，而插件不会，且如果开启该参数，指纹计算会额外占用集群内的计算资源）。
-4. `filter` 参数可以配置审计信息入库的过滤条件，该处使用 Stream Load 中 [where 参数](https://docs.mirrorship.cn/zh/docs/sql-reference/sql-statements/data-manipulation/STREAM_LOAD/#opt_properties)实现，即`-H "where: <condition>"`，默认为空，配置示例：`filter=isQuery=1 and clientIp like '127.0.0.1%' and user='root'`。
+> Note:
+> 1. It is recommended to use the default configuration of the parameter `frontend_host_port`, which is `127.0.0.1:8030`. Each FE in StarRocks independently manages its own audit information. After the audit plugin is installed, each FE will start its own background thread to collect and batch audit information and perform Stream Load writes. The `frontend_host_port` configuration item is used to provide the IP and port for the HTTP protocol for the plugin's background Stream Load tasks. This parameter does not support multiple values. The IP portion can be set to any FE's IP within the cluster, but this is not recommended, because if that FE encounters an issue, the audit information write tasks from other FEs' backgrounds will also fail due to communication failure. It is recommended to use the default `127.0.0.1:8030`, so that each FE uses its own HTTP port for communication, thereby avoiding the impact of other FE failures on communication (of course, all write tasks will ultimately be automatically forwarded to the FE Leader node for execution).
+> 2. The `secret_key` parameter is used to configure the "key string for encrypting the password". In the audit plugin, its length must not exceed 16 bytes. If this parameter is left empty, it means the password in `plugin.conf` will not be encrypted or decrypted, and the plaintext password can be configured directly in the password field. If this parameter is not empty, it means the password needs to be encrypted and decrypted, and the password field should be set to the encrypted string. The encrypted password can be generated in StarRocks using the `AES_ENCRYPT` function: `SELECT TO_BASE64(AES_ENCRYPT('password','secret_key'));`.
+> 3. The `enable_compute_all_query_digest` parameter indicates whether to generate a Hash SQL fingerprint for all queries (StarRocks only enables SQL fingerprinting for slow queries by default; note that the fingerprint calculation method in the plugin is inconsistent with the method inside FE — FE will normalize, while the plugin will not, and if this parameter is enabled, fingerprint calculation will consume additional computing resources in the cluster).
+> 4. The `filter` parameter can be used to configure filter conditions for audit information ingestion. It is implemented using the [where parameter](https://docs.starrocks.io/docs/sql-reference/sql-statements/loading_unloading/STREAM_LOAD/#opt_properties)in Stream Load, i.e., `-H "where: <condition>"`. It is empty by default. Configuration example: `filter=isQuery=1 and clientIp like '127.0.0.1%' and user='root'`.
+>
+> After making the modifications, repackage the three files above into a zip file:
+>
+> ```SHELL
+> [root@node01 ~]# zip -q -m -r auditloader.zip auditloader.jar plugin.conf plugin.properties
+> ```
+>
+> **Note**: This command will move the files to be packaged into auditloader.zip and overwrite the existing auditloader.zip file in that directory. That is, after executing the packaging command, only one latest auditloader.zip plugin package file will remain in that directory.
 
+##### 3. Distribute the plugin
 
-修改完成后，再将上面的三个文件重新打包为 zip 包：
-
-```SHELL
-[root@node01 ~]# zip -q -m -r auditloader.zip auditloader.jar plugin.conf plugin.properties
-```
-
-**注意**：该命令会将需要打包的文件移动到 auditloader.zip 中，并覆盖该目录下原有的 auditloader.zip 文件。也即执行完打包命令后，该目录下只会保留一个最新的 auditloader.zip 插件包文件。
-
-
-
-##### 3、分发插件
-
-将 auditloader.zip 分发至集群所有 FE 节点，各节点分发路径需要一致。例如都分发至StarRocks部署目录 `/opt/module/starrocks/` 下，也即 auditloader.zip 文件在集群所有FE节点的路径都为：
+Distribute auditloader.zip to all FE nodes in the cluster. The distribution path must be the same on each node. For example, distribute it to the StarRocks deployment directory `/opt/module/starrocks/`, meaning the path of the auditloader.zip file on all FE nodes in the cluster is:
 
 ```
 /opt/module/starrocks/auditloader.zip
 ```
 
-**说明**：也可将 auditloader.zip 分发至所有 FE 都可访问到的 http 服务中（例如 httpd 或 nginx），然后使用网络路径安装。注意这两种方式下 auditloader.zip 在执行安装后都需要在该路径下持续保留，不可在安装后删除源文件。
+> **Note**: You can also distribute `auditloader.zip` to an HTTP service accessible by all FEs (such as `httpd` or `nginx`), and then install it using a network path. Note that in both cases, `auditloader.zip` must remain at that path after installation and must not be deleted after installation.
 
+##### 4. Install the plugin
 
-
-##### 4、安装插件
-
-StarRocks安装本地插件的语法为：
+The syntax for installing a local plugin in StarRocks is:
 
 ```sql
 INSTALL PLUGIN FROM "/location/plugindemo.zip";
 ```
 
-若通过网络路径安装，还需要在安装命令的属性中提供插件压缩包的 md5 信息，语法示例：
+If installing via a network path, you also need to provide the md5 information of the plugin archive in the installation command's properties. Syntax example:
 
 ```sql
 INSTALL PLUGIN FROM "http://192.168.141.203/extra/auditloader.zip" PROPERTIES("md5sum" = "3975F7B880C9490FE95F42E2B2A28E2D");
 ```
 
-以安装本地插件包为例，根据上文分发文件的路径修改命令后执行：
+Taking the installation of a local plugin package as an example, modify the command according to the path of the distributed file described above and then execute it:
 
 ```SQL
 mysql> INSTALL PLUGIN FROM "/opt/module/starrocks/auditloader.zip";
 ```
 
-安装完成后，查看当前已安装插件信息：
+After installation is complete, view the currently installed plugin information:
 
 ```SQL
 mysql> SHOW PLUGINS\G
@@ -221,26 +213,24 @@ JavaVersion: 1.8.0
  Properties: {}
 ```
 
-可看到当前集群有两个插件，其中 Name 为 `AuditLoader` 的插件即为上文安装的审计日志插件，插件状态为 INSTALLED 表示已安装成功。Name 为 `__builtin_AuditLogBuilder` 的插件为 StarRocks 内置的审计插件，用来打印审计信息到本地日志目录生成  fe.audit.log。这两个插件的数据来源于 FE 的同一个方法，正常情况下审计日志表中的数据应与本地审计日志文件中的内容保持一致 。
+You can see that the current cluster has two plugins. The plugin with Name `AuditLoader` is the audit log plugin installed above, and a plugin status of INSTALLED indicates successful installation. The plugin with Name `__builtin_AuditLogBuilder` is the built-in audit plugin of StarRocks, used to print audit information to the local log directory to generate fe.audit.log. Both plugins source their data from the same FE method, and under normal circumstances the data in the audit log table should remain consistent with the content in the local audit log file.
 
+##### 5. Uninstall the Plugin
 
-
-##### 5、卸载插件
-
-在需要升级插件或者调整插件配置时，已安装的 AuditLoader 插件也可视需求进行卸载，卸载命令的语法为：
+When you need to upgrade the plugin or adjust its configuration, the already-installed AuditLoader plugin can also be uninstalled as needed. The syntax for the uninstall command is:
 
 ```SQL
 UNINSTALL PLUGIN plugin_name;
---plugin_name 即 SHOW PLUGINS 命令查到的插件 Name 信息，通常应为 AuditLoader。
+--plugin_name is the plugin Name information retrieved by the SHOW PLUGINS command, and it should typically be AuditLoader.
 ```
 
-**注意**：fe/plugins 是 StarRocks 外部插件的安装目录，在审计插件安装完成后，会在各个 FE 的 fe/plugins 中生成一个 AuditLoader 文件夹（插件卸载后该目录自动删除）。若我们后续需要修改插件的配置，除卸载重装插件（推荐），也可替换该目录中的 auditloader.jar 或修改 plugin.conf，然后重启 FE 使修改生效。
+> **Note**:
+>
+> `fe/plugins` is the installation directory for StarRocks external plugins. After the audit plugin is installed, an AuditLoader folder will be created in the `fe/plugins` directory of each FE (this directory is automatically deleted after the plugin is uninstalled). If you need to modify the plugin configuration later, in addition to uninstalling and reinstalling the plugin (recommended), you can also replace the auditloader.jar in that directory or modify `plugin.conf`, then restart FE for the changes to take effect.
 
+##### 6. View Data
 
-
-##### 6、查看数据
-
-在 AuditLoader 插件安装完成后，SQL 执行后的审计信息并不是实时入库。StarRocks 后台会按照配置文件 plugin.conf 中配置的参数，攒批 60 秒或 50M 执行一次 Stream Load 导入。测试等待期间，可简单执行几条 SQL 语句，看对应的审计数据是否能够正常入库，例如执行：
+After the AuditLoader plugin is installed, audit information from SQL executions is not loaded into the database in real time. The StarRocks backend will batch data for 60 seconds or 50M according to the parameters configured in the configuration file plugin.conf before executing a Stream Load import. During the test waiting period, you can simply execute a few SQL statements to check whether the corresponding audit data can be loaded into the database normally, for example:
 
 ```sql
 mysql> CREATE DATABASE test;
@@ -248,40 +238,34 @@ mysql> CREATE TABLE test.audit_test(c1 int,c2 int,c3 int,c4 date,c5 bigint) Dist
 mysql> insert into test.audit_test values(211014001,10001,13,'2021-10-14',1999),(211014002,10002,13,'2021-10-14',6999),(211015098,16573,19,'2021-10-15',3999);
 ```
 
-等待 1 分钟左右，查看审计表数据：
+Wait about 1 minute, then view the audit table data:
 
 ```sql
 mysql> select * from starrocks_audit_db__.starrocks_audit_tbl__;
 ```
 
+##### 7. Troubleshooting
 
+Under normal circumstances, data can be correctly loaded into the database. If the plugin is installed successfully and dynamic partitions are created successfully but audit information has still not been imported into the table for a long time, you can check whether the IP, port, user permissions, user password, and other information in the configuration file plugin.conf are correct. The AuditLoader logs are printed in the `fe.log` of each FE. You can also search for the keyword `audit` in `fe.log` and use the approach for troubleshooting Stream Load tasks to locate the issue.
 
-##### 7、异常排查
+##### 8. Extended Usage
 
-正常数据都可以正确入库，如果插件安装成功，同时动态分区创建成功后审计信息仍然长时间没导入至表内，您可以检查配置文件 plugin.conf 中 IP、端口、用户权限、用户密码等信息是否正确。AuditLoader 的日志会打印在各个 FE 的 fe.log 中，您也可以在 fe.log 中检索关键字 `audit`，用排查 Stream Load 任务的思路来定位问题。
+The `queryType` types supported in the StarRocks audit table include: query, slow\_query, and connection. For query and slow\_query, the AuditLoader plugin uses the `qe_slow_log_ms` time configured in `plugin.conf` for comparison and judgment. SQL statements with an execution time greater than `qe_slow_log_ms` are classified as slow\_query, which you can use to perform statistics on slow SQL in the cluster.
 
+For connection, StarRocks 3.0.6+ supports printing successful/failed connection information when a client connects in `fe.audit.log`. You can configure `audit_log_modules=slow_query,query,connection` in `fe.conf` and then restart FE to enable it. After enabling connection information, the AuditLoader plugin can also collect this type of client connection information and load it into the table `starrocks_audit_tbl__`. After loading, the `queryType` field of the audit table for this type of information will be connection, which you can use to audit user login information.
 
-
-##### 8、拓展用法
-
-StarRocks审计表中支持的 `queryType` 类型包括：query、slow_query 和 connection。对于 query 和 slow_query，AuditLoader 插件使用 `plugin.conf` 中配置的 `qe_slow_log_ms` 时间来进行对比判断，SQL 执行时长大于 `qe_slow_log_ms` 的即为 slow_query，您可以以此进行集群慢 SQL 的统计。
-
-对于 connection，StarRocks 3.0.6+ 版本支持在 fe.audit.log 中打印客户端连接时成功/失败的 connection 信息，您可以在 `fe.conf` 里配置 `audit_log_modules=slow_query,query,connection`，然后重启 FE 来进行启用。在启用 connection 信息后，AuditLoader 插件同样能采集到这类客户端连接信息并入库到表 `starrocks_audit_tbl__` 中，入库后该类信息对应的审计表的 `queryType` 字段即为 connection，您可以以此进行用户登录信息的审计。
-
-
-
-### 更新说明：
+### Release Notes:
 
 ##### AuditLoader  v4.2.1
 
-1）新增在 plugin.conf 中配置密文密码的功能
+1. Added the ability to configure encrypted passwords in plugin.conf
 
-2）在审计日志表中预留增加了 candidateMVs 和 hitMvs 两个重要监测字段
+2. Added two important monitoring fields, candidateMVs and hitMvs, as reserved fields in the audit log table
 
-3）适配 StarRocks 审计日志 QueriedRelations 字段
+3. Adapted to the StarRocks audit log QueriedRelations field
 
-4）新增在 plugin.conf 中通过 filter 参数进行审计信息的入库条件筛选功能
+4. Added the ability to filter audit information storage conditions via the filter parameter in plugin.conf
 
-5）调整插件攒批逻辑为 Json，规避 StarRocks 3.2.12+ 等版本 FE netty 依赖升级导致的原 CSV 攒批逻辑在写入时报错 `Validation failed for header 'column_separator'` 的问题
+5. Adjusted the plugin batching logic to Json, to avoid the issue where upgrading the FE `netty` dependency in StarRocks 3.2.12+ and other versions caused the original CSV batching logic to report the error `Validation failed for header 'column_separator'` during writes
 
-6）其他细节优化
+6. Other minor optimizations
