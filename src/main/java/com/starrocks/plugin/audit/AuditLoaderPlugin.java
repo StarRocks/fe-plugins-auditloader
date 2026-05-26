@@ -17,6 +17,7 @@
 
 package com.starrocks.plugin.audit;
 
+import com.starrocks.common.Config;
 import com.starrocks.plugin.*;
 import com.starrocks.sql.ast.StatementBase;
 import com.starrocks.sql.common.SqlDigestBuilder;
@@ -82,6 +83,11 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
      * 是否包含新字段 queriedRelations，如果旧版本没有该字段则值为空
      */
     private boolean queriedRelationsExists;
+    /**
+     * Whether the FE supports the audit_stmt_before_execute configuration.
+     * Older StarRocks versions do not have this field, so resolve it by reflection.
+     */
+    private Field auditStmtBeforeExecuteField;
 
     @Override
     public void init(PluginInfo info, PluginContext ctx) throws PluginException {
@@ -102,6 +108,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             candidateMvsExists = hasField(AuditEvent.class, "candidateMvs");
             hitMVsExists = hasField(AuditEvent.class, "hitMVs");
             queriedRelationsExists = hasField(AuditEvent.class, "queriedRelations");
+            auditStmtBeforeExecuteField = getField(Config.class, "audit_stmt_before_execute");
 
             isInit = true;
         }
@@ -151,6 +158,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
 
     public boolean eventFilter(AuditEvent.EventType type) {
         return type == AuditEvent.EventType.AFTER_QUERY ||
+                (type == AuditEvent.EventType.BEFORE_QUERY && isAuditStmtBeforeExecuteEnabled()) ||
                 type == AuditEvent.EventType.CONNECTION;
     }
 
@@ -179,6 +187,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         String content = "{\"queryId\":\"" + getQueryId(queryType, event) + "\"," +
                 "\"timestamp\":\"" + longToTimeString(event.timestamp) + "\"," +
                 "\"queryType\":\"" + queryType + "\"," +
+                "\"eventType\":" + getEventTypeJsonValue(event) + "," +
                 "\"clientIp\":\"" + event.clientIp + "\"," +
                 "\"user\":\"" + event.user + "\"," +
                 "\"authorizedUser\":\"" + event.authorizedUser + "\"," +
@@ -301,6 +310,13 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         }
     }
 
+    private String getEventTypeJsonValue(AuditEvent event) {
+        if (!isAuditStmtBeforeExecuteEnabled() || event.type == null) {
+            return "null";
+        }
+        return "\"" + event.type.name() + "\"";
+    }
+
     /**
      * 类中是否包含指定字段
      *
@@ -316,6 +332,26 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             }
         }
         return false;
+    }
+
+    private Field getField(Class<?> clazz, String fieldName) {
+        try {
+            return clazz.getDeclaredField(fieldName);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean isAuditStmtBeforeExecuteEnabled() {
+        if (auditStmtBeforeExecuteField == null) {
+            return false;
+        }
+        try {
+            return auditStmtBeforeExecuteField.getBoolean(null);
+        } catch (Exception e) {
+            LOG.debug("encounter exception when getting audit_stmt_before_execute from FE config", e);
+            return false;
+        }
     }
 
     public static class AuditLoaderConf {

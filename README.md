@@ -27,6 +27,7 @@ CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
   `queryId` VARCHAR(64) COMMENT "Unique ID of the query",
   `timestamp` DATETIME NOT NULL COMMENT "Query start time",
   `queryType` VARCHAR(12) COMMENT "Query type (query, slow_query, connection)",
+  `eventType` VARCHAR(16) NULL COMMENT "Audit event type (BEFORE_QUERY, AFTER_QUERY, CONNECTION). This field is NULL when audit_stmt_before_execute is disabled",
   `clientIp` VARCHAR(32) COMMENT "Client IP",
   `user` VARCHAR(64) COMMENT "Query username",
   `authorizedUser` VARCHAR(64) COMMENT "Unique user identifier, i.e., user_identity",
@@ -254,7 +255,22 @@ The `queryType` types supported in the StarRocks audit table include: query, slo
 
 For connection, StarRocks 3.0.6+ supports printing successful/failed connection information when a client connects in `fe.audit.log`. You can configure `audit_log_modules=slow_query,query,connection` in `fe.conf` and then restart FE to enable it. After enabling connection information, the AuditLoader plugin can also collect this type of client connection information and load it into the table `starrocks_audit_tbl__`. After loading, the `queryType` field of the audit table for this type of information will be connection, which you can use to audit user login information.
 
+For StarRocks versions that support `audit_stmt_before_execute`, the AuditLoader plugin automatically detects whether this FE configuration is enabled. When it is disabled or unsupported by the current FE version, the `eventType` field is loaded as `NULL`, and query statements still produce only the normal after-execution audit record. When `audit_stmt_before_execute` is enabled, AuditLoader also collects before-execution audit events. You can use `eventType` to distinguish `BEFORE_QUERY`, `AFTER_QUERY`, and `CONNECTION` records.
+
+If you are upgrading from an earlier AuditLoader table, add the nullable field before installing the new plugin package:
+
+```sql
+ALTER TABLE starrocks_audit_db__.starrocks_audit_tbl__
+ADD COLUMN `eventType` VARCHAR(16) NULL COMMENT "Audit event type (BEFORE_QUERY, AFTER_QUERY, CONNECTION). This field is NULL when audit_stmt_before_execute is disabled";
+```
+
 ### Release Notes:
+
+##### AuditLoader  v4.2.2
+
+1. Added the `eventType` field. It is populated only when the FE configuration `audit_stmt_before_execute` is enabled; otherwise, it is loaded as `NULL`.
+
+2. Added collection of `BEFORE_QUERY` audit events when `audit_stmt_before_execute` is enabled, allowing before- and after-execution audit records to be distinguished in the audit table.
 
 ##### AuditLoader  v4.2.1
 
