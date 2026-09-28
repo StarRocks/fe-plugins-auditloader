@@ -52,6 +52,7 @@ CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
   `candidateMVs` varchar(65533) NULL COMMENT "List of candidate MVs",
   `hitMvs` varchar(65533) NULL COMMENT "List of hit MVs",
   `QueriedRelations` ARRAY<VARCHAR(65533)> NULL COMMENT "Tables and views directly accessed by the query",
+  `customQueryId` VARCHAR(65533) NULL COMMENT "Value of the custom_query_id session variable",
   `warehouse` VARCHAR(128) NULL COMMENT "Warehouse name"
 ) ENGINE = OLAP
 DUPLICATE KEY (`queryId`, `timestamp`, `queryType`)
@@ -262,7 +263,7 @@ For connection, StarRocks 3.0.6+ supports printing successful/failed connection 
 
 2. Added two important monitoring fields, candidateMVs and hitMvs, as reserved fields in the audit log table
 
-3. Adapted to the StarRocks audit log QueriedRelations field
+3. Adapted to the StarRocks audit log QueriedRelations and customQueryId fields
 
 4. Added the ability to filter audit information storage conditions via the filter parameter in plugin.conf
 

@@ -82,6 +82,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
      * 是否包含新字段 queriedRelations，如果旧版本没有该字段则值为空
      */
     private boolean queriedRelationsExists;
+    private boolean customQueryIdExists;
 
     @Override
     public void init(PluginInfo info, PluginContext ctx) throws PluginException {
@@ -102,6 +103,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             candidateMvsExists = hasField(AuditEvent.class, "candidateMvs");
             hitMVsExists = hasField(AuditEvent.class, "hitMVs");
             queriedRelationsExists = hasField(AuditEvent.class, "queriedRelations");
+            customQueryIdExists = hasField(AuditEvent.class, "customQueryId");
 
             isInit = true;
         }
@@ -176,6 +178,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         String candidateMvsVal = candidateMvsExists ? event.candidateMvs : "";
         String hitMVsVal = hitMVsExists ? event.hitMVs : "";
         String queriedRelationsVal = queriedRelationsExists ? getQueriedRelationsJson(event) : "null";
+        String customQueryIdVal = customQueryIdExists ? escapeJson(getCustomQueryId(event)) : "";
         String content = "{\"queryId\":\"" + getQueryId(queryType, event) + "\"," +
                 "\"timestamp\":\"" + longToTimeString(event.timestamp) + "\"," +
                 "\"queryType\":\"" + queryType + "\"," +
@@ -196,7 +199,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 "\"stmtId\":" + event.stmtId + "," +
                 "\"isQuery\":" + isQuery + "," +
                 "\"feIp\":\"" + event.feIp + "\"," +
-                "\"stmt\":\"" + truncateByBytes(event.stmt) + "\"," +
+                "\"stmt\":\"" + escapeJson(truncateByBytes(event.stmt)) + "\"," +
                 "\"digest\":\"" + event.digest + "\"," +
                 "\"planCpuCosts\":" + event.planCpuCosts + "," +
                 "\"planMemCosts\":" + event.planMemCosts + "," +
@@ -204,6 +207,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 "\"candidateMVs\":\"" + candidateMvsVal + "\"," +
                 "\"hitMvs\":\"" + hitMVsVal + "\"," +
                 "\"QueriedRelations\":" + queriedRelationsVal + "," +
+                "\"customQueryId\":\"" + customQueryIdVal + "\"," +
                 "\"warehouse\":\"" + event.warehouse + "\"}";
         if (auditBuffer.length() > 0) {
             auditBuffer.append(",");
@@ -299,6 +303,29 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             LOG.debug("encounter exception when getting queriedRelations from audit event", e);
             return "null";
         }
+    }
+
+    private String getCustomQueryId(AuditEvent event) {
+        try {
+            return Objects.toString(AuditEvent.class.getDeclaredField("customQueryId").get(event), "");
+        } catch (ReflectiveOperationException e) {
+            LOG.debug("encounter exception when getting customQueryId from audit event", e);
+            return "";
+        }
+    }
+
+    static String escapeJson(String value) {
+        StringBuilder escaped = new StringBuilder(value.length());
+        for (char c : value.toCharArray()) {
+            if (c == '"' || c == '\\') {
+                escaped.append('\\').append(c);
+            } else if (c < 0x20) {
+                escaped.append(String.format("\\u%04x", (int) c));
+            } else {
+                escaped.append(c);
+            }
+        }
+        return escaped.toString();
     }
 
     /**
