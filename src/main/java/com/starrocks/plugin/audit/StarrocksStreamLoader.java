@@ -106,7 +106,7 @@ public class StarrocksStreamLoader {
     private String toCurl(HttpURLConnection conn) {
         StringBuilder sb = new StringBuilder("curl -v ");
         sb.append("-X ").append(conn.getRequestMethod()).append(" \\\n  ");
-        sb.append("-H \"").append("Authorization\":").append("\"Basic " + authEncoding).append("\" \\\n  ");
+        sb.append("-H \"").append("Authorization\":").append("\"Basic <redacted>").append("\" \\\n  ");
         sb.append("-H \"").append("Expect\":").append("\"100-continue\" \\\n  ");
         sb.append("-H \"").append("Content-Type\":").append("\"text/plain; charset=UTF-8\" \\\n  ");
         sb.append("-H \"").append("format\":").append("\"json \\\n  ");
