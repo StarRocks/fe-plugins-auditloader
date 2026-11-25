@@ -52,7 +52,8 @@ CREATE TABLE starrocks_audit_db__.starrocks_audit_tbl__ (
   `candidateMVs` varchar(65533) NULL COMMENT "List of candidate MVs",
   `hitMvs` varchar(65533) NULL COMMENT "List of hit MVs",
   `QueriedRelations` ARRAY<VARCHAR(65533)> NULL COMMENT "Tables and views directly accessed by the query",
-  `warehouse` VARCHAR(128) NULL COMMENT "Warehouse name"
+  `warehouse` VARCHAR(128) NULL COMMENT "Warehouse name",
+  `ScanStats` JSON NULL COMMENT "Read statistics of each scan node, per execution attempt"
 ) ENGINE = OLAP
 DUPLICATE KEY (`queryId`, `timestamp`, `queryType`)
 COMMENT "Audit log table"
@@ -255,6 +256,24 @@ The `queryType` types supported in the StarRocks audit table include: query, slo
 For connection, StarRocks 3.0.6+ supports printing successful/failed connection information when a client connects in `fe.audit.log`. You can configure `audit_log_modules=slow_query,query,connection` in `fe.conf` and then restart FE to enable it. After enabling connection information, the AuditLoader plugin can also collect this type of client connection information and load it into the table `starrocks_audit_tbl__`. After loading, the `queryType` field of the audit table for this type of information will be connection, which you can use to audit user login information.
 
 ### Release Notes:
+
+##### AuditLoader  v4.2.2
+
+1. Adapted to the StarRocks audit log ScanStats field: per scan node read statistics (table, connector, physical/logical/output rows, remote/cache bytes) for each execution attempt, loaded into a `JSON` column. FE versions without this field load `NULL`.
+
+   The audit table must have the `ScanStats` column, otherwise the Stream Load fails. For an existing audit table, add it before upgrading the plugin:
+
+   ```SQL
+   ALTER TABLE starrocks_audit_db__.starrocks_audit_tbl__ ADD COLUMN `ScanStats` JSON NULL COMMENT "Read statistics of each scan node, per execution attempt" AFTER `warehouse`;
+   ```
+
+   Example query, the scans of the first execution attempt:
+
+   ```SQL
+   SELECT queryId, json_query(ScanStats, '$.attempts[0].scans') AS scans
+   FROM starrocks_audit_db__.starrocks_audit_tbl__
+   WHERE ScanStats IS NOT NULL;
+   ```
 
 ##### AuditLoader  v4.2.1
 
