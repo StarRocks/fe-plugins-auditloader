@@ -82,6 +82,10 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
      * 是否包含新字段 queriedRelations，如果旧版本没有该字段则值为空
      */
     private boolean queriedRelationsExists;
+    /**
+     * 是否包含新字段 scanStats，如果旧版本没有该字段则值为空
+     */
+    private boolean scanStatsExists;
 
     @Override
     public void init(PluginInfo info, PluginContext ctx) throws PluginException {
@@ -102,6 +106,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
             candidateMvsExists = hasField(AuditEvent.class, "candidateMvs");
             hitMVsExists = hasField(AuditEvent.class, "hitMVs");
             queriedRelationsExists = hasField(AuditEvent.class, "queriedRelations");
+            scanStatsExists = hasField(AuditEvent.class, "scanStats");
 
             isInit = true;
         }
@@ -176,6 +181,7 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
         String candidateMvsVal = candidateMvsExists ? event.candidateMvs : "";
         String hitMVsVal = hitMVsExists ? event.hitMVs : "";
         String queriedRelationsVal = queriedRelationsExists ? getQueriedRelationsJson(event) : "null";
+        String scanStatsVal = scanStatsExists ? getScanStatsJson(event) : "null";
         String content = "{\"queryId\":\"" + getQueryId(queryType, event) + "\"," +
                 "\"timestamp\":\"" + longToTimeString(event.timestamp) + "\"," +
                 "\"queryType\":\"" + queryType + "\"," +
@@ -204,7 +210,8 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                 "\"candidateMVs\":\"" + candidateMvsVal + "\"," +
                 "\"hitMvs\":\"" + hitMVsVal + "\"," +
                 "\"QueriedRelations\":" + queriedRelationsVal + "," +
-                "\"warehouse\":\"" + event.warehouse + "\"}";
+                "\"warehouse\":\"" + event.warehouse + "\"," +
+                "\"ScanStats\":" + scanStatsVal + "}";
         if (auditBuffer.length() > 0) {
             auditBuffer.append(",");
         }
@@ -297,6 +304,29 @@ public class AuditLoaderPlugin extends Plugin implements AuditPlugin {
                     .collect(Collectors.joining(",")) + "]";
         } catch (Exception e) {
             LOG.debug("encounter exception when getting queriedRelations from audit event", e);
+            return "null";
+        }
+    }
+
+    /**
+     * The FE writes scanStats as a JSON object (per scan read statistics, per execution attempt).
+     * It is embedded as-is so that it lands in a JSON column; anything that does not look like
+     * a JSON object is dropped to keep the batch loadable.
+     */
+    private String getScanStatsJson(AuditEvent event) {
+        try {
+            Field scanStatsField = AuditEvent.class.getDeclaredField("scanStats");
+            Object value = scanStatsField.get(event);
+            if (!(value instanceof String)) {
+                return "null";
+            }
+            String scanStats = ((String) value).trim();
+            if (scanStats.length() < 2 || scanStats.charAt(0) != '{' || scanStats.charAt(scanStats.length() - 1) != '}') {
+                return "null";
+            }
+            return scanStats;
+        } catch (Exception e) {
+            LOG.debug("encounter exception when getting scanStats from audit event", e);
             return "null";
         }
     }
